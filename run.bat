@@ -1,0 +1,3 @@
+@echo off
+echo Starting Migration Optimizer...
+streamlit run app.py
