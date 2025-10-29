@@ -5,7 +5,7 @@
 
 import pandas as pd
 import io
-from typing import Dict, Set, List, Tuple
+from typing import Dict, Set, List, Tuple, Optional
 from collections import defaultdict
 from data_processor import DataProcessor
 from ILP import ILPSoftwareSelector
@@ -37,6 +37,7 @@ class MigrationOptimizer:
         """
         wave_software = set()
         migrating_arms = set()
+        
         available_software = set(self.processor.software_to_arms.keys()) - already_tested
 
         untested_needs: Dict[str, int] = {
@@ -78,11 +79,13 @@ class MigrationOptimizer:
 
             best_software = None
             if software_scores:
-                best_software = max(software_scores, key=software_scores.get)
+                # Сортируем по очкам (по убыванию), затем по имени (по возрастанию)
+                best_software = max(software_scores.keys(), key=lambda sw: (software_scores[sw], sw))
             else:
                 current_popularity = {sw: pop for sw, pop in popularity.items() if sw in available_software}
                 if current_popularity:
-                    best_software = max(current_popularity, key=current_popularity.get)
+                    # То же самое для популярности
+                    best_software = max(current_popularity.keys(), key=lambda sw: (current_popularity[sw], sw))
             
             if best_software is None:
                 break
@@ -100,13 +103,14 @@ class MigrationOptimizer:
 
         return wave_software, migrating_arms
 
-    def calculate_waves(self, wave_limits: List[int], use_ilp: bool = False) -> Dict:
+    def calculate_waves(self, wave_limits: List[int], use_ilp: bool = False, time_limit: Optional[int] = None) -> Dict:
         """
         Рассчитать распределение ПО по волнам (ручной режим)
 
         Args:
             wave_limits: Список лимитов ПО для каждой волны
             use_ilp: Использовать точный ILP алгоритм (True) или эвристический (False)
+            time_limit: Максимальное время работы ILP решателя в секундах (только для use_ilp=True)
 
         Returns:
             Словарь с результатами расчёта
@@ -114,7 +118,8 @@ class MigrationOptimizer:
         tested_software = set()
         migrated_arms = set()
         software_wave_map = {}
-
+        arm_wave_map = {}  # Карта АРМ -> номер волны
+        n_waves = len(wave_limits)
         waves_data = []
 
         remaining_arms = set(self.processor.arm_software_map.keys())
@@ -126,7 +131,8 @@ class MigrationOptimizer:
                 wave_software, wave_arms = ilp_solver.find_best_software_set_ilp(
                     limit=limit,
                     already_tested=tested_software,
-                    remaining_arms=remaining_arms - migrated_arms
+                    remaining_arms=remaining_arms - migrated_arms,
+                    time_limit=time_limit / n_waves
                 )
             else:
                 wave_software, wave_arms = self.find_best_software_set(
@@ -143,6 +149,10 @@ class MigrationOptimizer:
             # Помечаем каждое ПО номером волны
             for software in wave_software:
                 software_wave_map[software] = wave_num
+            
+            # Помечаем каждый мигрирующий АРМ номером волны
+            for arm in wave_arms:
+                arm_wave_map[arm] = wave_num
 
             # Сохраняем статистику волны
             waves_data.append({
@@ -158,83 +168,102 @@ class MigrationOptimizer:
             'total_tested_software': len(tested_software),
             'total_migrated_arms': len(migrated_arms),
             'software_wave_map': software_wave_map,
+            'arm_wave_map': arm_wave_map,  # Добавляем карту АРМ -> волна
             'tested_software': tested_software,
             'migrated_arms': migrated_arms
         }
 
+    def _find_minimum_software_greedy(
+    self,
+    target_arms_count: int,
+    already_tested: Set[str]
+) -> Tuple[Set[str], Set[str]]:
+        """
+        Эвристический (жадный) алгоритм для задачи Set Cover.
+        Вынесен в отдельный метод для переиспользования.
+        """
+        selected_software = set()
+        covered_arms = self.processor.get_covered_arms(already_tested)
+        
+        # Преобразуем в отсортированный список для детерминизма
+        available_software_list = sorted(list(set(self.processor.software_to_arms.keys()) - already_tested))
+
+        while len(covered_arms) < target_arms_count and available_software_list:
+            uncovered_arms = set(self.processor.arm_software_map.keys()) - covered_arms
+            if not uncovered_arms:
+                break
+
+            best_software = None
+            best_score = -1
+            
+            # <<< ИЗМЕНЕНИЕ: Детерминированный выбор >>>
+            for software in available_software_list:
+                # Эвристика: выбираем ПО, которое затрагивает максимум еще не покрытых АРМ
+                score = len(self.processor.software_to_arms.get(software, set()) & uncovered_arms)
+                
+                if score > best_score:
+                    best_score = score
+                    best_software = software
+            # При равенстве очков будет выбрано ПО, которое идет раньше в отсортированном списке `available_software_list`
+            
+            if best_software is None:
+                break
+
+            selected_software.add(best_software)
+            available_software_list.remove(best_software)
+            
+            # Пересчитываем полное покрытие после добавления ПО
+            covered_arms = self.processor.get_covered_arms(already_tested | selected_software)
+
+        return selected_software, covered_arms
+    
     def find_minimum_software_for_coverage(
         self,
         target_arms_count: int,
         already_tested: Set[str] = None,
-        use_ilp: bool = False
+        use_ilp: bool = False,
+        use_warm_start: bool = True,
+        time_limit: Optional[int] = None
     ) -> Tuple[Set[str], Set[str]]:
         """
         Найти минимальный набор ПО для покрытия заданного количества АРМ.
         
         Args:
-            target_arms_count: Целевое количество АРМ для покрытия
-            already_tested: Уже протестированное ПО
-            use_ilp: Использовать точный ILP алгоритм (True) или эвристический (False)
-        
-        Returns:
-            Кортеж (выбранное ПО, покрытые АРМ)
+            time_limit: Максимальное время работы ILP решателя в секундах (только для use_ilp=True)
         """
         if already_tested is None:
             already_tested = set()
 
-        # Выбираем алгоритм
         if use_ilp:
             ilp_solver = ILPSoftwareSelector(self.processor)
+            warm_start_solution = None
+
+            # <<< ИЗМЕНЕНИЕ: Логика "теплого старта" >>>
+            if use_warm_start:
+                print("Calculating greedy solution for warm start...")
+                greedy_solution, greedy_covered = self._find_minimum_software_greedy(
+                    target_arms_count=target_arms_count,
+                    already_tested=already_tested
+                )
+                # Убедимся, что жадный алгоритм вообще нашел решение
+                if len(greedy_covered) >= target_arms_count:
+                    print(f"Greedy solution found: {len(greedy_solution)} software. Using as warm start.")
+                    warm_start_solution = greedy_solution
+                else:
+                    print("Greedy algorithm could not find a feasible solution. Running ILP without warm start.")
+            
             return ilp_solver.find_minimum_software_for_coverage_ilp(
+                target_arms_count=target_arms_count,
+                already_tested=already_tested,
+                warm_start_solution=warm_start_solution,  # Передаем полное решение (или None)
+                time_limit=time_limit
+            )
+        else:
+            # Если ILP не используется, просто вызываем жадный алгоритм
+            return self._find_minimum_software_greedy(
                 target_arms_count=target_arms_count,
                 already_tested=already_tested
             )
-        
-        # Эвристический алгоритм
-        selected_software = set()
-        
-        # Начинаем с уже покрытых АРМ, если они есть
-        # Это будет нашей отправной точкой и целью для цикла
-        covered_arms = self.processor.get_covered_arms(already_tested)
-        available_software = set(self.processor.software_to_arms.keys()) - already_tested
-
-        # Цикл продолжается, пока реальное число ПОЛНОСТЬЮ покрытых АРМ меньше цели
-        while len(covered_arms) < target_arms_count and available_software:
-            best_software = None
-            best_new_coverage_count = -1
-            
-            # Ключевая оптимизация: работаем с множеством АРМ, которые еще НЕ покрыты
-            uncovered_arms = set(self.processor.arm_software_map.keys()) - covered_arms
-
-            # Если покрывать больше некого, выходим
-            if not uncovered_arms:
-                break
-
-            # На каждом шаге выбираем ПО, которое "затрагивает" максимальное число
-            # еще не покрытых АРМ. Это и есть правильная эвристика для Set Cover.
-            for software in available_software:
-                # Считаем, сколько новых АРМ "затронет" это ПО
-                newly_covered_count = len(self.processor.software_to_arms.get(software, set()) & uncovered_arms)
-                if newly_covered_count > best_new_coverage_count:
-                    best_new_coverage_count = newly_covered_count
-                    best_software = software
-
-            # Если ни одно ПО не помогает покрыть оставшихся, выходим
-            if best_software is None:
-                break
-
-            # Добавляем лучшее ПО в наш набор
-            selected_software.add(best_software)
-            available_software.remove(best_software)
-            
-            # После выбора ПО, мы должны ПЕРЕСЧИТАТЬ, сколько АРМ теперь ПОЛНОСТЬЮ покрыты.
-            # Это медленная операция, но она необходима для корректной работы условия `while`.
-            # Для скорости можно было бы использовать эвристику, но для точности лучше так.
-            covered_arms = self.processor.get_covered_arms(
-                already_tested | selected_software
-            )
-
-        return selected_software, covered_arms
 
     def calculate_auto_recommendations(self) -> Dict:
         """
@@ -289,32 +318,42 @@ class MigrationOptimizer:
             }
         }
 
-    def export_to_excel(self, results: Dict, original_filename: str) -> io.BytesIO:
+    def export_to_excel(self, results: Dict, original_filename: str, tested_software_set: Set[str] = None) -> io.BytesIO:
         """
         Экспортировать результаты в Excel файл с тремя листами
 
         Args:
             results: Результаты расчёта волн
             original_filename: Имя исходного файла
+            tested_software_set: Множество протестированного ПО (опционально)
 
         Returns:
             BytesIO буфер с Excel файлом
         """
+        if tested_software_set is None:
+            tested_software_set = set()
+            
         output = io.BytesIO()
 
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            # Лист 1: "Data" - исходные данные + столбец "Волна миграции"
+            # Лист 1: "Data" - исходные данные + столбцы "Волна миграции" и опционально "ПО протестировано"
             df_data = self.processor.original_df.copy()
 
-            # Добавляем столбец с номером волны
-            software_wave_map = results['software_wave_map']
+            # Добавляем столбец с номером волны на основе АРМа (не ПО!)
+            arm_wave_map = results.get('arm_wave_map', {})
 
-            def get_wave(software_name):
-                return software_wave_map.get(software_name, 'N/A')
+            def get_wave(arm_name):
+                return arm_wave_map.get(arm_name, 'N/A')
 
             df_data['Волна миграции'] = df_data[
-                self.processor.software_column
+                self.processor.arm_column  # Используем столбец с АРМ, а не ПО
             ].apply(get_wave)
+            
+            # Добавляем столбец "ПО протестировано" только если есть протестированное ПО
+            if tested_software_set:
+                df_data['ПО протестировано'] = df_data[
+                    self.processor.software_column
+                ].apply(lambda sw: sw in tested_software_set)
 
             df_data.to_excel(writer, sheet_name='Data', index=False)
 
@@ -378,5 +417,60 @@ class MigrationOptimizer:
 
         output.seek(0)
         return output
+
+    @staticmethod
+    def create_software_export(software_list: List[str], tested_software_set: Set[str], sheet_name: str = 'ПО') -> io.BytesIO:
+        """
+        Создать Excel файл со списком ПО и столбцом "ПО протестировано"
+        
+        Args:
+            software_list: Список ПО для экспорта
+            tested_software_set: Множество протестированного ПО
+            sheet_name: Название листа в Excel
+            
+        Returns:
+            BytesIO буфер с Excel файлом
+        """
+        sorted_list = sorted(software_list)
+        
+        # Добавляем столбец "ПО протестировано" только если есть протестированное ПО
+        if tested_software_set:
+            df_software = pd.DataFrame({
+                'ПО для тестирования': sorted_list,
+                'ПО протестировано': [sw in tested_software_set for sw in sorted_list]
+            })
+        else:
+            df_software = pd.DataFrame({
+                'ПО для тестирования': sorted_list
+            })
+        
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df_software.to_excel(writer, sheet_name=sheet_name, index=False)
+        output.seek(0)
+        return output
+    
+    @staticmethod
+    def create_arms_export(arms_list: List[str], sheet_name: str = 'АРМ') -> io.BytesIO:
+        """
+        Создать Excel файл со списком АРМов
+        
+        Args:
+            arms_list: Список АРМов для экспорта
+            sheet_name: Название листа в Excel
+            
+        Returns:
+            BytesIO буфер с Excel файлом
+        """
+        df_arms = pd.DataFrame({
+            'Мигрирующие АРМ': sorted(arms_list)
+        })
+        
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df_arms.to_excel(writer, sheet_name=sheet_name, index=False)
+        output.seek(0)
+        return output
+
 
 

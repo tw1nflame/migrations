@@ -1,8 +1,8 @@
-from typing import Set, Tuple, Dict
-from pulp import LpMaximize, LpProblem, LpVariable, lpSum, LpBinary, PULP_CBC_CMD, LpMinimize
+from typing import Optional, Set, Tuple, Dict
+from pulp import LpMaximize, LpProblem, LpVariable, lpSum, LpBinary, PULP_CBC_CMD, LpMinimize, LpStatus, HiGHS_CMD
 from collections import defaultdict
 from data_processor import DataProcessor
-
+from pulp import HiGHS
 
 class ILPSoftwareSelector:
     """
@@ -18,10 +18,15 @@ class ILPSoftwareSelector:
         limit: int,
         already_tested: Set[str],
         remaining_arms: Set[str],
-        selection_bonus: float = 0.001
+        selection_bonus: float = 0.001,
+        time_limit: Optional[int] = None
     ) -> Tuple[Set[str], Set[str]]:
         """
         Находит оптимальный набор ПО, максимизируя количество ПОЛНОСТЬЮ покрытых АРМов.
+        
+        Args:
+            time_limit: Максимальное время работы решателя в секундах (None = без ограничения).
+                       При ограничении времени решатель может вернуть неоптимальное, но допустимое решение.
         """
         available_software = list(
             set(self.processor.software_to_arms.keys()) - already_tested
@@ -85,9 +90,9 @@ class ILPSoftwareSelector:
 
         # РЕШЕНИЕ ЗАДАЧИ
         # Используем CBC решатель, который идет в комплекте с PuLP. msg=0 отключает лишний вывод.
-        solver = PULP_CBC_CMD(
+        solver = HiGHS(
             msg=0,
-            timeLimit=None
+            timeLimit=time_limit
         )
 
         problem.solve(solver)
@@ -106,89 +111,119 @@ class ILPSoftwareSelector:
         return selected_software, migrating_arms
     
     def find_minimum_software_for_coverage_ilp(
-        self,
-        target_arms_count: int,
-        already_tested: Set[str] = None
-    ) -> Tuple[Set[str], Set[str]]:
+    self,
+    target_arms_count: int,
+    already_tested: Set[str] = None,
+    warm_start_solution: Optional[Set[str]] = None,
+    time_limit: Optional[int] = None
+) -> Tuple[Set[str], Set[str]]:
         """
-        ILP-вариант задачи Set Cover:
-        найти минимальный набор ПО, который полностью покрывает не менее target_arms_count АРМов.
+        ILP-вариант задачи Set Cover с поддержкой "теплого старта" и фильтрацией недостижимых пользователей.
+
+        Args:
+            target_arms_count: Целевое количество АРМов для покрытия.
+            already_tested: Множество уже протестированного ПО.
+            warm_start_solution: Опциональное стартовое решение (набор ПО) для ускорения.
+            time_limit: Максимальное время работы решателя в секундах (None = без ограничения).
+                       При ограничении времени решатель может вернуть неоптимальное, но допустимое решение.
         """
         if already_tested is None:
             already_tested = set()
 
-        available_software = list(
-            set(self.processor.software_to_arms.keys()) - already_tested
-        )
-        remaining_arms = set(self.processor.arm_software_map.keys())
+        # --- Доступное ПО и пользователи ---
+        available_software_set = set(self.processor.software_to_arms.keys()) - already_tested
+        available_software = list(available_software_set)
+        all_arms = set(self.processor.arm_software_map.keys())
 
-        if not available_software or not remaining_arms:
+        if not available_software or not all_arms:
             return set(), set()
 
-        # Создаем задачу минимизации
+        # --- Если есть warm start, используем его размер как верхнюю границу K ---
+        if warm_start_solution:
+            upper_bound = len(warm_start_solution)
+            print(f"[INFO] Warm start detected: {upper_bound} software selected. "
+                f"Filtering users requiring more than {upper_bound} software.")
+        else:
+            upper_bound = None
+
+        # --- Фильтрация пользователей, которые требуют > K ПО ---
+        def arm_degree(arm: str) -> int:
+            """Количество ПО, требуемых для покрытия данного пользователя (с учетом already_tested)."""
+            return len((self.processor.arm_software_map.get(arm, set()) - already_tested) & available_software_set)
+
+        if upper_bound is not None:
+            remaining_arms = {
+                arm for arm in all_arms
+                if 0 < arm_degree(arm) <= upper_bound
+            }
+        else:
+            remaining_arms = {
+                arm for arm in all_arms
+                if arm_degree(arm) > 0
+            }
+
+        print(f"[INFO] Remaining ARMs after filtering: {len(remaining_arms)} out of {len(all_arms)}")
+
+        # --- Создаем задачу ILP ---
         problem = LpProblem("Minimize_Software_for_Target_Coverage", LpMinimize)
 
-        # Переменные решения
-        x = {
-            sw: LpVariable(f"sw_{i}", cat=LpBinary)
-            for i, sw in enumerate(available_software)
-        }
+        # Переменные выбора ПО
+        x = {sw: LpVariable(f"sw_{i}", cat=LpBinary) for i, sw in enumerate(available_software)}
 
-        z = {
-            arm: LpVariable(f"arm_{j}", cat=LpBinary)
-            for j, arm in enumerate(remaining_arms)
-        }
+        # Задаем начальные значения из warm start
+        if warm_start_solution:
+            for sw in available_software:
+                x[sw].setInitialValue(1 if sw in warm_start_solution else 0)
 
-        # Цель: минимизировать количество выбранных ПО
+        # Переменные покрытия пользователей
+        z = {arm: LpVariable(f"arm_{j}", cat=LpBinary) for j, arm in enumerate(remaining_arms)}
+
+        # Целевая функция — минимизировать количество выбранных ПО
         problem += lpSum(x.values()), "Minimize_Software_Count"
 
-        # Связь между ПО и полным покрытием АРМов
+        # --- Ограничения покрытия ---
         for arm in remaining_arms:
-            untested_sw_for_arm = [
-                sw for sw in (self.processor.arm_software_map.get(arm, set()) - already_tested)
-                if sw in available_software
-            ]
-
+            untested_sw_for_arm = list(
+                (self.processor.arm_software_map.get(arm, set()) - already_tested) & available_software_set
+            )
             if not untested_sw_for_arm:
-                problem += z[arm] == 0, f"ARM_uncoverable_{arm}"
+                problem += z[arm] == 0
                 continue
 
-            # z[arm] <= x[sw] для каждого нужного ПО
+            n = len(untested_sw_for_arm)
+
+            # z[arm] ≤ x[sw] для всех sw ∈ требуемом множестве
             for sw in untested_sw_for_arm:
-                problem += z[arm] <= x[sw], f"ARM_completeness_{arm}_{sw}"
+                problem += z[arm] <= x[sw]
 
-            # z[arm] >= sum(x[sw]) - (N-1)
-            problem += (
-                z[arm] >= lpSum(x[sw] for sw in untested_sw_for_arm) - (len(untested_sw_for_arm) - 1),
-                f"ARM_force_complete_{arm}"
-            )
+            # z[arm] ≥ sum(x[sw]) - (n - 1)
+            problem += z[arm] >= lpSum(x[sw] for sw in untested_sw_for_arm) - (n - 1)
 
-        # Должно быть покрыто хотя бы target_arms_count АРМов
+        # Целевое количество покрытых пользователей
         problem += lpSum(z.values()) >= target_arms_count, "Target_Coverage"
 
-        # Настройка solver для детерминированности
-        solver = PULP_CBC_CMD(
-            msg=0,
-            timeLimit=600,
-            options=[
-                'randomSeed 123',
-                'randomCbcSeed 456'
-            ]
-        )
+        # --- Ограничение на количество ПО из warm start ---
+        if warm_start_solution:
+            problem += lpSum(x.values()) <= upper_bound, "Heuristic_Upper_Bound"
 
-        # Решаем задачу
+        # --- Решатель ---
+        solver = HiGHS(
+            timeLimit=time_limit,
+            options=['randomSeed 123', 'randomCbcSeed 456']
+        )
         problem.solve(solver)
 
-        # Извлекаем решение
-        selected_software = {
-            sw for sw in available_software
-            if x[sw].varValue is not None and x[sw].varValue > 0.5
-        }
+        # --- Проверка статуса решения ---
+        if LpStatus[problem.status] != 'Optimal':
+            print(f"[WARN] Optimal ILP solution not found. Status: {LpStatus[problem.status]}")
+            if warm_start_solution:
+                covered_by_greedy = self.processor.get_covered_arms(already_tested | warm_start_solution)
+                if len(covered_by_greedy) >= target_arms_count:
+                    return warm_start_solution, covered_by_greedy
 
-        covered_arms = {
-            arm for arm in remaining_arms
-            if z[arm].varValue is not None and z[arm].varValue > 0.5
-        }
+        # --- Извлечение результата ---
+        selected_software = {sw for sw in available_software if x[sw].varValue > 0.5}
+        covered_arms = {arm for arm in remaining_arms if z[arm].varValue > 0.5}
 
+        print(f"[RESULT] Selected {len(selected_software)} software, covered {len(covered_arms)} users.")
         return selected_software, covered_arms
-
