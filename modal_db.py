@@ -73,18 +73,6 @@ def show_db_export_modal(excel_buffer, filename: str, on_export_callback, defaul
     
     # Обработка нажатия кнопки экспорта (вне колонок для полноширинных сообщений)
     if export_clicked:
-        print(f"\n{'='*70}")
-        print(f"🔘 КНОПКА 'ЭКСПОРТИРОВАТЬ' НАЖАТА В МОДАЛЬНОМ ОКНЕ")
-        print(f"{'='*70}")
-        print(f"Параметры из формы:")
-        print(f"  - schema: '{schema}' (type: {type(schema).__name__})")
-        print(f"  - table: '{table}' (type: {type(table).__name__})")
-        print(f"  - user: '{user}' (type: {type(user).__name__})")
-        print(f"  - password: {'*' * len(password) if password else 'EMPTY'} (type: {type(password).__name__})")
-        print(f"  - if_exists: '{if_exists}'")
-        print(f"  - excel_buffer: {type(excel_buffer).__name__}, size: {excel_buffer.getbuffer().nbytes if hasattr(excel_buffer, 'getbuffer') else 'unknown'} bytes")
-        print(f"{'='*70}\n")
-        
         # Валидация полей
         errors = []
         
@@ -98,16 +86,12 @@ def show_db_export_modal(excel_buffer, filename: str, on_export_callback, defaul
             errors.append("Не указан пароль")
         
         if errors:
-            print(f"❌ ОШИБКИ ВАЛИДАЦИИ:")
             for error in errors:
-                print(f"   - {error}")
                 st.error(f"❌ {error}")
         else:
-            print(f"✅ Валидация полей пройдена, вызываем callback...\n")
             # Вызов функции экспорта
             try:
                 with st.spinner("Экспорт в базу данных..."):
-                    print(f"🚀 ВЫЗОВ on_export_callback...")
                     on_export_callback(
                         excel_buffer=excel_buffer,
                         schema=schema.strip(),
@@ -116,12 +100,6 @@ def show_db_export_modal(excel_buffer, filename: str, on_export_callback, defaul
                         password=password,
                         if_exists=if_exists
                     )
-                    print(f"✅ Callback выполнен успешно!\n")
                 st.success("✅ Данные успешно экспортированы в базу данных!")
             except Exception as e:
-                print(f"\n❌ ИСКЛЮЧЕНИЕ В МОДАЛЬНОМ ОКНЕ:")
-                print(f"   Тип: {type(e).__name__}")
-                print(f"   Сообщение: {str(e)}")
-                import traceback
-                print(f"   Traceback:\n{traceback.format_exc()}")
                 st.error(f"❌ Ошибка при экспорте: {str(e)}")

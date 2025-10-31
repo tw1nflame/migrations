@@ -58,17 +58,42 @@ class Exporter:
                 self.processor.arm_column  # Используем столбец с АРМ, а не ПО
             ].apply(get_wave)
 
-            # Присоединяем статус тестирования через merge
+            # Присоединяем данные о протестированном ПО через маппинг
             if tested_software_df is not None and not tested_software_df.empty and tested_software_column:
-                df_data = df_data.merge(
-                    tested_software_df,
-                    left_on=self.processor.software_column,
-                    right_on=tested_software_column,
-                    how='left'
-                )
-                # Удаляем дублирующий столбец если он появился
-                if tested_software_column != self.processor.software_column:
-                    df_data = df_data.drop(columns=[tested_software_column])
+                try:
+                    # Загружаем файл маппинга
+                    # ascupo_name - названия из большого файла (пользователи)
+                    # eatool_name - названия из справочника с протестированным ПО
+                    mapping_df = pd.read_excel('mapping.excel')
+                    
+                    # Шаг 1: Присоединяем маппинг к данным пользователей
+                    df_data = df_data.merge(
+                        mapping_df[['ascupo_name', 'eatool_name']],
+                        left_on=self.processor.software_column,
+                        right_on='ascupo_name',
+                        how='left'
+                    )
+                    
+                    # Шаг 2: Присоединяем ВСЕ колонки из tested_software_df
+                    df_data = df_data.merge(
+                        tested_software_df,
+                        left_on='eatool_name',
+                        right_on=tested_software_column,
+                        how='left'
+                    )
+                    
+                    # Удаляем служебные колонки
+                    columns_to_drop = ['ascupo_name', 'eatool_name']
+                    if tested_software_column != self.processor.software_column and tested_software_column in df_data.columns:
+                        columns_to_drop.append(tested_software_column)
+                    df_data = df_data.drop(columns=[col for col in columns_to_drop if col in df_data.columns])
+                        
+                except FileNotFoundError:
+                    # Если файл маппинга не найден, пропускаем присоединение
+                    pass
+                except Exception as e:
+                    # Логируем ошибку, но не прерываем экспорт
+                    print(f"Ошибка при загрузке маппинга: {e}")
 
             # Переименовываем ключевые колонки в стандартные имена
             rename_map = {
@@ -76,12 +101,6 @@ class Exporter:
                 self.processor.arm_column: 'arm_id',
                 'Волна миграции': 'wave'
             }
-            
-            # Если есть колонка статуса (второй столбец из tested_software_df), переименовываем её
-            if tested_software_df is not None and not tested_software_df.empty and len(tested_software_df.columns) > 1:
-                status_column = tested_software_df.columns[1]  # Второй столбец - статус
-                if status_column in df_data.columns:
-                    rename_map[status_column] = 'software_status'
             
             df_data = df_data.rename(columns=rename_map)
             
@@ -172,18 +191,41 @@ class Exporter:
             'ПО для тестирования': sorted_list
         })
 
-        # Присоединяем статус через merge если есть данные
+        # Присоединяем данные о протестированном ПО через маппинг
         # Проверяем что это DataFrame, а не set (для обратной совместимости)
         if tested_software_df is not None and isinstance(tested_software_df, pd.DataFrame) and not tested_software_df.empty and tested_software_column:
-            df_software = df_software.merge(
-                tested_software_df,
-                left_on='ПО для тестирования',
-                right_on=tested_software_column,
-                how='left'
-            )
-            # Удаляем дублирующий столбец если он появился
-            if tested_software_column != 'ПО для тестирования':
-                df_software = df_software.drop(columns=[tested_software_column])
+            try:
+                # Загружаем файл маппинга
+                mapping_df = pd.read_excel('mapping.excel')
+                
+                # Шаг 1: Присоединяем маппинг к списку ПО
+                df_software = df_software.merge(
+                    mapping_df[['ascupo_name', 'eatool_name']],
+                    left_on='ПО для тестирования',
+                    right_on='ascupo_name',
+                    how='left'
+                )
+                
+                # Шаг 2: Присоединяем ВСЕ колонки из tested_software_df
+                df_software = df_software.merge(
+                    tested_software_df,
+                    left_on='eatool_name',
+                    right_on=tested_software_column,
+                    how='left'
+                )
+                
+                # Удаляем служебные колонки
+                columns_to_drop = ['ascupo_name', 'eatool_name']
+                if tested_software_column != 'ПО для тестирования' and tested_software_column in df_software.columns:
+                    columns_to_drop.append(tested_software_column)
+                df_software = df_software.drop(columns=[col for col in columns_to_drop if col in df_software.columns])
+                    
+            except FileNotFoundError:
+                # Если файл маппинга не найден, пропускаем присоединение
+                pass
+            except Exception as e:
+                # Логируем ошибку, но не прерываем экспорт
+                print(f"Ошибка при загрузке маппинга: {e}")
 
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -249,50 +291,14 @@ class Exporter:
         import pandas as pd
         from sqlalchemy import create_engine, text
 
-        # ЛОГИРОВАНИЕ ПАРАМЕТРОВ В САМОМ НАЧАЛЕ
-        print(f"\n{'='*60}")
-        print(f"🔌 НАЧАЛО ЭКСПОРТА В БД")
-        print(f"{'='*60}")
-        print(f"Параметры подключения (полученные функцией):")
-        print(f"  - host: '{host}' (type: {type(host).__name__})")
-        print(f"  - port: '{port}' (type: {type(port).__name__}, repr: {repr(port)}, len: {len(str(port))})")
-        print(f"  - database: '{database}' (type: {type(database).__name__})")
-        print(f"  - schema: '{schema}'")
-        print(f"  - table: '{table}'")
-        print(f"  - user: '{user}'")
-        print(f"  - if_exists: '{if_exists}'")
-        # Проверка на скрытые символы в порте
-        port_str = str(port)
-        print(f"\nАнализ строки порта:")
-        print(f"  - ASCII codes: {[ord(c) for c in port_str]}")
-        print(f"  - После strip: '{port_str.strip()}' (len: {len(port_str.strip())})")
-        print(f"{'='*60}\n")
-
         # Сброс указателя буфера в начало
         excel_buffer.seek(0)
 
         # Чтение всех листов из Excel
         excel_data = pd.read_excel(excel_buffer, sheet_name=None, engine='openpyxl')
 
-        # Валидация и преобразование порта
-        try:
-            # Убираем пробелы и преобразуем в int
-            port_str_cleaned = str(port).strip()
-            print(f"🔧 Преобразование порта: '{port_str_cleaned}' -> int")
-            port_int = int(port_str_cleaned)
-            print(f"✅ Порт успешно преобразован: {port_int}")
-            
-            if port_int <= 0 or port_int > 65535:
-                raise ValueError(f"Порт должен быть в диапазоне 1-65535, получено: {port_int}")
-        except ValueError as e:
-            print(f"❌ ОШИБКА преобразования порта!")
-            print(f"   Исходное значение: '{port}' (type: {type(port).__name__})")
-            print(f"   После strip: '{str(port).strip()}'")
-            print(f"   Ошибка: {e}")
-            raise ValueError(f"Некорректное значение порта '{port}': {e}") from e
-
         # Создание строки подключения
-        connection_string = f"postgresql://{user}:{password}@{host}:{port_int}/{database}"
+        connection_string = f"postgresql://{user}:{password}@{host}:{port}/{database}"
         engine = create_engine(connection_string)
 
         try:
@@ -302,49 +308,14 @@ class Exporter:
                 with connection.begin(): # Начинаем транзакцию для DDL
                     connection.execute(text(f"CREATE SCHEMA IF NOT EXISTS {schema}"))
 
-            # Шаг 2: Экспорт только первого листа в указанную таблицу
-            # Берем первый лист из словаря
             first_sheet_name = list(excel_data.keys())[0]
             df = excel_data[first_sheet_name]
-            
-            print(f"📊 Экспорт данных в БД:")
-            print(f"  - Лист: {first_sheet_name}")
-            print(f"  - Строк: {len(df)}")
-            print(f"  - Столбцов: {len(df.columns)}")
-            print(f"  - Колонки: {list(df.columns)}")
-            
-            # Логируем типы данных ПЕРЕД обработкой
-            print(f"\n🔍 Типы данных ПЕРЕД обработкой:")
-            for col in df.columns:
-                print(f"  - {col}: {df[col].dtype}, unique values: {df[col].nunique()}, null count: {df[col].isna().sum()}")
             
             # Заменяем пустые строки и NaN на None (NULL в SQL)
             df = df.replace('', None)
             df = df.replace('nan', None)
             df = df.where(pd.notna(df), None)  # Заменяем все NaN на None (pandas 2.0+)
             
-            # Преобразуем все столбцы в строковый тип, чтобы избежать ошибок типов данных
-            print(f"\n🔧 Преобразование столбцов в строки...")
-            for col in df.columns:
-                try:
-                    original_dtype = df[col].dtype
-                    df[col] = df[col].astype(str).replace('None', None).replace('nan', None).replace('NaN', None).replace('<NA>', None)
-                    print(f"  ✅ {col}: {original_dtype} -> str")
-                except Exception as col_error:
-                    print(f"  ❌ Ошибка в колонке '{col}': {col_error}")
-                    raise Exception(f"Ошибка преобразования колонки '{col}': {col_error}") from col_error
-            
-            # Логируем типы данных ПОСЛЕ обработки
-            print(f"\n🔍 Типы данных ПОСЛЕ обработки:")
-            for col in df.columns:
-                print(f"  - {col}: {df[col].dtype}, null count: {df[col].isna().sum()}")
-            
-            # Показываем первые строки для отладки
-            print(f"\n📋 Первые 3 строки данных:")
-            print(df.head(3).to_string())
-            
-            # Экспортируем в таблицу с указанным именем (без суффикса)
-            print(f"\n💾 Загрузка в PostgreSQL...")
             df.to_sql(
                 name=table,
                 con=engine,
@@ -354,15 +325,9 @@ class Exporter:
                 method='multi',
                 chunksize=1000
             )
-            print(f"✅ Данные успешно загружены в {schema}.{table}")
 
         except Exception as e:
-            # Перехватываем исключение и выбрасываем его с более понятным сообщением
-            import traceback
-            error_details = traceback.format_exc()
-            print(f"\n❌ ОШИБКА при экспорте:")
-            print(error_details)
-            raise Exception(f"Ошибка при экспорте в базу данных: {e}\n\nДетали:\n{error_details}") from e
+            raise Exception(f"Ошибка при экспорте в базу данных: {e}") from e
 
         finally:
             # Важно освободить ресурсы движка после использования
