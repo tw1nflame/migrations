@@ -52,7 +52,7 @@ class Exporter:
             arm_wave_map = results.get('arm_wave_map', {})
 
             def get_wave(arm_name):
-                return arm_wave_map.get(arm_name, 'N/A')
+                return arm_wave_map.get(arm_name, None)  # None вместо 'N/A' для совместимости с БД
 
             df_data['Волна миграции'] = df_data[
                 self.processor.arm_column  # Используем столбец с АРМ, а не ПО
@@ -270,7 +270,44 @@ class Exporter:
             first_sheet_name = list(excel_data.keys())[0]
             df = excel_data[first_sheet_name]
             
+            print(f"📊 Экспорт данных в БД:")
+            print(f"  - Лист: {first_sheet_name}")
+            print(f"  - Строк: {len(df)}")
+            print(f"  - Столбцов: {len(df.columns)}")
+            print(f"  - Колонки: {list(df.columns)}")
+            
+            # Логируем типы данных ПЕРЕД обработкой
+            print(f"\n🔍 Типы данных ПЕРЕД обработкой:")
+            for col in df.columns:
+                print(f"  - {col}: {df[col].dtype}, unique values: {df[col].nunique()}, null count: {df[col].isna().sum()}")
+            
+            # Заменяем пустые строки и NaN на None (NULL в SQL)
+            df = df.replace('', None)
+            df = df.replace('nan', None)
+            df = df.fillna(None)  # Заменяем все NaN на None
+            
+            # Преобразуем все столбцы в строковый тип, чтобы избежать ошибок типов данных
+            print(f"\n🔧 Преобразование столбцов в строки...")
+            for col in df.columns:
+                try:
+                    original_dtype = df[col].dtype
+                    df[col] = df[col].astype(str).replace('None', None).replace('nan', None).replace('NaN', None).replace('<NA>', None)
+                    print(f"  ✅ {col}: {original_dtype} -> str")
+                except Exception as col_error:
+                    print(f"  ❌ Ошибка в колонке '{col}': {col_error}")
+                    raise Exception(f"Ошибка преобразования колонки '{col}': {col_error}") from col_error
+            
+            # Логируем типы данных ПОСЛЕ обработки
+            print(f"\n🔍 Типы данных ПОСЛЕ обработки:")
+            for col in df.columns:
+                print(f"  - {col}: {df[col].dtype}, null count: {df[col].isna().sum()}")
+            
+            # Показываем первые строки для отладки
+            print(f"\n📋 Первые 3 строки данных:")
+            print(df.head(3).to_string())
+            
             # Экспортируем в таблицу с указанным именем (без суффикса)
+            print(f"\n💾 Загрузка в PostgreSQL...")
             df.to_sql(
                 name=table,
                 con=engine,
@@ -280,10 +317,15 @@ class Exporter:
                 method='multi',
                 chunksize=1000
             )
+            print(f"✅ Данные успешно загружены в {schema}.{table}")
 
         except Exception as e:
             # Перехватываем исключение и выбрасываем его с более понятным сообщением
-            raise Exception(f"Ошибка при экспорте в базу данных: {e}") from e
+            import traceback
+            error_details = traceback.format_exc()
+            print(f"\n❌ ОШИБКА при экспорте:")
+            print(error_details)
+            raise Exception(f"Ошибка при экспорте в базу данных: {e}\n\nДетали:\n{error_details}") from e
 
         finally:
             # Важно освободить ресурсы движка после использования
