@@ -141,8 +141,6 @@ class ILPSoftwareSelector:
         # --- Если есть warm start, используем его размер как верхнюю границу K ---
         if warm_start_solution:
             upper_bound = len(warm_start_solution)
-            print(f"[INFO] Warm start detected: {upper_bound} software selected. "
-                f"Filtering users requiring more than {upper_bound} software.")
         else:
             upper_bound = None
 
@@ -162,7 +160,6 @@ class ILPSoftwareSelector:
                 if arm_degree(arm) > 0
             }
 
-        print(f"[INFO] Remaining ARMs after filtering: {len(remaining_arms)} out of {len(all_arms)}")
 
         # --- Создаем задачу ILP ---
         problem = LpProblem("Minimize_Software_for_Target_Coverage", LpMinimize)
@@ -209,13 +206,13 @@ class ILPSoftwareSelector:
         # --- Решатель ---
         solver = HiGHS(
             timeLimit=time_limit,
-            options=['randomSeed 123', 'randomCbcSeed 456']
+            options=['randomSeed 123', 'randomCbcSeed 456'],
+            msg=0
         )
         problem.solve(solver)
 
         # --- Проверка статуса решения ---
         if LpStatus[problem.status] != 'Optimal':
-            print(f"[WARN] Optimal ILP solution not found. Status: {LpStatus[problem.status]}")
             if warm_start_solution:
                 covered_by_greedy = self.processor.get_covered_arms(already_tested | warm_start_solution)
                 if len(covered_by_greedy) >= target_arms_count:
@@ -225,5 +222,4 @@ class ILPSoftwareSelector:
         selected_software = {sw for sw in available_software if x[sw].varValue > 0.5}
         covered_arms = {arm for arm in remaining_arms if z[arm].varValue > 0.5}
 
-        print(f"[RESULT] Selected {len(selected_software)} software, covered {len(covered_arms)} users.")
         return selected_software, covered_arms
