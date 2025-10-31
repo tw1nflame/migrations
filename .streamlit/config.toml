@@ -1,5 +1,10 @@
 [server]
 fileWatcherType = "none"
+headless = true
 
 [runner]
-fastReruns = true
+fastReruns = false
+magicEnabled = false
+
+[browser]
+gatherUsageStats = false
