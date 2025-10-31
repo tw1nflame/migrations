@@ -261,7 +261,6 @@ class Exporter:
         print(f"  - table: '{table}'")
         print(f"  - user: '{user}'")
         print(f"  - if_exists: '{if_exists}'")
-        
         # Проверка на скрытые символы в порте
         port_str = str(port)
         print(f"\nАнализ строки порта:")

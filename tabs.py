@@ -218,9 +218,33 @@ def tabs(tab1, tab2, tab3, tab4, st, processor, optimizer, uploaded_file, export
                     
                     # Функция обратного вызова для экспорта
                     def export_callback(excel_buffer, schema, table, user, password, if_exists):
+                        print(f"\n{'='*70}")
+                        print(f"📞 ВХОД В CALLBACK-ФУНКЦИЮ (TAB1 - Эвристика)")
+                        print(f"{'='*70}")
+                        print(f"Полученные параметры:")
+                        print(f"  - excel_buffer: {type(excel_buffer).__name__}")
+                        print(f"  - schema: '{schema}'")
+                        print(f"  - table: '{table}'")
+                        print(f"  - user: '{user}'")
+                        print(f"  - if_exists: '{if_exists}'")
+                        
+                        print(f"\nЧтение переменных окружения...")
                         host = os.getenv('DB_HOST', 'localhost')
                         port = os.getenv('DB_PORT', '5432')
                         database = os.getenv('DB_NAME', 'postgres')
+                        
+                        print(f"Переменные окружения:")
+                        print(f"  - DB_HOST: '{host}' (type: {type(host).__name__}, repr: {repr(host)})")
+                        print(f"  - DB_PORT: '{port}' (type: {type(port).__name__}, repr: {repr(port)}, len: {len(str(port))})")
+                        print(f"  - DB_NAME: '{database}' (type: {type(database).__name__}, repr: {repr(database)})")
+                        
+                        # Проверка на пустую строку
+                        if port == '':
+                            print(f"\n⚠️  ВНИМАНИЕ: DB_PORT - ПУСТАЯ СТРОКА!")
+                        
+                        print(f"\n🚀 Вызов exporter.export_excel_to_database...")
+                        print(f"{'='*70}\n")
+                        
                         exporter.export_excel_to_database(
                             excel_buffer=excel_buffer,
                             schema=schema,
