@@ -173,7 +173,8 @@ class Exporter:
         })
 
         # Присоединяем статус через merge если есть данные
-        if tested_software_df is not None and not tested_software_df.empty and tested_software_column:
+        # Проверяем что это DataFrame, а не set (для обратной совместимости)
+        if tested_software_df is not None and isinstance(tested_software_df, pd.DataFrame) and not tested_software_df.empty and tested_software_column:
             df_software = df_software.merge(
                 tested_software_df,
                 left_on='ПО для тестирования',
@@ -237,7 +238,7 @@ class Exporter:
             user: Логин пользователя БД
             password: Пароль пользователя БД
             host: Адрес сервера БД
-            port: Порт БД
+            port: Порт БД (строка или число)
             database: Название базы данных
             if_exists: Действие при существующей таблице ('fail', 'replace', 'append')
 
@@ -248,14 +249,51 @@ class Exporter:
         import pandas as pd
         from sqlalchemy import create_engine, text
 
+        # ЛОГИРОВАНИЕ ПАРАМЕТРОВ В САМОМ НАЧАЛЕ
+        print(f"\n{'='*60}")
+        print(f"🔌 НАЧАЛО ЭКСПОРТА В БД")
+        print(f"{'='*60}")
+        print(f"Параметры подключения (полученные функцией):")
+        print(f"  - host: '{host}' (type: {type(host).__name__})")
+        print(f"  - port: '{port}' (type: {type(port).__name__}, repr: {repr(port)}, len: {len(str(port))})")
+        print(f"  - database: '{database}' (type: {type(database).__name__})")
+        print(f"  - schema: '{schema}'")
+        print(f"  - table: '{table}'")
+        print(f"  - user: '{user}'")
+        print(f"  - if_exists: '{if_exists}'")
+        
+        # Проверка на скрытые символы в порте
+        port_str = str(port)
+        print(f"\nАнализ строки порта:")
+        print(f"  - ASCII codes: {[ord(c) for c in port_str]}")
+        print(f"  - После strip: '{port_str.strip()}' (len: {len(port_str.strip())})")
+        print(f"{'='*60}\n")
+
         # Сброс указателя буфера в начало
         excel_buffer.seek(0)
 
         # Чтение всех листов из Excel
         excel_data = pd.read_excel(excel_buffer, sheet_name=None, engine='openpyxl')
 
+        # Валидация и преобразование порта
+        try:
+            # Убираем пробелы и преобразуем в int
+            port_str_cleaned = str(port).strip()
+            print(f"🔧 Преобразование порта: '{port_str_cleaned}' -> int")
+            port_int = int(port_str_cleaned)
+            print(f"✅ Порт успешно преобразован: {port_int}")
+            
+            if port_int <= 0 or port_int > 65535:
+                raise ValueError(f"Порт должен быть в диапазоне 1-65535, получено: {port_int}")
+        except ValueError as e:
+            print(f"❌ ОШИБКА преобразования порта!")
+            print(f"   Исходное значение: '{port}' (type: {type(port).__name__})")
+            print(f"   После strip: '{str(port).strip()}'")
+            print(f"   Ошибка: {e}")
+            raise ValueError(f"Некорректное значение порта '{port}': {e}") from e
+
         # Создание строки подключения
-        connection_string = f"postgresql://{user}:{password}@{host}:{port}/{database}"
+        connection_string = f"postgresql://{user}:{password}@{host}:{port_int}/{database}"
         engine = create_engine(connection_string)
 
         try:
@@ -284,7 +322,7 @@ class Exporter:
             # Заменяем пустые строки и NaN на None (NULL в SQL)
             df = df.replace('', None)
             df = df.replace('nan', None)
-            df = df.fillna(None)  # Заменяем все NaN на None
+            df = df.where(pd.notna(df), None)  # Заменяем все NaN на None (pandas 2.0+)
             
             # Преобразуем все столбцы в строковый тип, чтобы избежать ошибок типов данных
             print(f"\n🔧 Преобразование столбцов в строки...")
