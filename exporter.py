@@ -66,6 +66,9 @@ class Exporter:
                 try:
                     mapping_df = pd.read_excel('mapping.xlsx')
                     
+                    # Запоминаем все столбцы из маппинга (чтобы потом удалить их)
+                    mapping_columns = list(mapping_df.columns)
+                    
                     # Создаем промежуточный DataFrame: маппинг + данные о протестированном ПО
                     # mapping_df содержит: ascupo_name (из основного файла, семейство ПО) и eatool_name (из tested файла)
                     tested_with_mapping = mapping_df.merge(
@@ -83,8 +86,8 @@ class Exporter:
                         how='left'
                     )
                     
-                    # Удаляем столбцы маппинга и дублирующий столбец ПО из tested файла
-                    columns_to_drop = ['ascupo_name', 'eatool_name', tested_software_column]
+                    # Удаляем только ВСЕ столбцы из маппинга (оставляем все из tested файла)
+                    columns_to_drop = mapping_columns
                     df_data = df_data.drop(columns=[col for col in columns_to_drop if col in df_data.columns])
                     
                 except FileNotFoundError:
@@ -207,6 +210,9 @@ class Exporter:
                 # Загружаем файл маппинга
                 mapping_df = pd.read_excel('mapping.xlsx')
                 
+                # Запоминаем все столбцы из маппинга (чтобы потом удалить их)
+                mapping_columns = list(mapping_df.columns)
+                
                 # Получаем уникальные пары: ПО -> Семейство ПО из исходного файла
                 software_to_family = original_df[[software_column, software_family_column]].drop_duplicates()
                 
@@ -234,8 +240,8 @@ class Exporter:
                     how='left'
                 )
                 
-                # Удаляем столбцы маппинга, дублирующий столбец ПО из tested файла и дублирующий столбец ПО из исходного файла
-                columns_to_drop = ['ascupo_name', 'eatool_name', tested_software_column, software_column]
+                # Удаляем ВСЕ столбцы из маппинга и дублирующий столбец ПО из исходного файла (оставляем все из tested файла)
+                columns_to_drop = mapping_columns + [software_column]
                 df_software = df_software.drop(columns=[col for col in columns_to_drop if col in df_software.columns])
                 
             except FileNotFoundError:

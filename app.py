@@ -93,8 +93,8 @@ with st.sidebar:
         
         # Кнопка для загрузки протестированного ПО в БД
         if st.button("🗄️ Загрузить список протестированного ПО в БД", key="export_tested_software_db_sidebar", type="primary"):
-            # Создаем DataFrame с выбранными столбцами
-            tested_df_clean = tested_df_preview[[tested_software_column, tested_status_column]].dropna(subset=[tested_software_column])
+            # Берем ВСЕ столбцы и убираем строки с пустыми значениями в столбце ПО
+            tested_df_clean = tested_df_preview.dropna(subset=[tested_software_column])
             
             # Создаем Excel буфер
             import io
