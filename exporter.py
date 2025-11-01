@@ -330,11 +330,14 @@ class Exporter:
         engine = create_engine(connection_string)
 
         try:
-            # Шаг 1: Убедимся, что схема существует.
-            # Это лучше делать в отдельном соединении/транзакции перед циклом.
             with engine.connect() as connection:
-                with connection.begin(): # Начинаем транзакцию для DDL
+                with connection.begin():
+                    # Шаг 1: Создаем схему если не существует
                     connection.execute(text(f"CREATE SCHEMA IF NOT EXISTS {schema}"))
+                    
+                    # Шаг 2: Явно удаляем таблицу если она существует (для replace)
+                    if if_exists == 'replace':
+                        connection.execute(text(f"DROP TABLE IF EXISTS {schema}.{table} CASCADE"))
 
             first_sheet_name = list(excel_data.keys())[0]
             df = excel_data[first_sheet_name]
@@ -344,11 +347,12 @@ class Exporter:
             df = df.replace('nan', None)
             df = df.where(pd.notna(df), None)  # Заменяем все NaN на None (pandas 2.0+)
             
+            # Используем 'fail' вместо 'replace' т.к. мы уже удалили таблицу выше
             df.to_sql(
                 name=table,
                 con=engine,
                 schema=schema,
-                if_exists=if_exists,
+                if_exists='fail' if if_exists == 'replace' else if_exists,
                 index=False,
                 method='multi',
                 chunksize=1000
