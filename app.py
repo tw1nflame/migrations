@@ -179,7 +179,9 @@ with st.sidebar:
                 software_family_column = st.selectbox(
                     "Столбец с семейством ПО (для маппинга с протестированным ПО)",
                     options=columns,
-                    index=2 if len(columns) > 2 else 0,  # По умолчанию третий столбец (индекс 2)
+                    index=columns.index("Программное обеспечение.Семейство")
+                        if "Программное обеспечение.Семейство" in columns 
+                        else (2 if len(columns) > 2 else 0),
                     help="Столбец с семейством ПО, значения которого совпадают с ascupo_name в файле маппинга",
                     key="software_family_column_main"
                 )
