@@ -127,10 +127,14 @@ def tabs(tab1, tab2, tab3, tab4, st, processor, optimizer, uploaded_file, export
                         # Экспорт списка ПО
                         tested_software_df = st.session_state.get('tested_software_df', None)
                         tested_software_column = st.session_state.get('tested_software_column', None)
+                        software_family_column = st.session_state.get('software_family_column', None)
                         output_sw = exporter.create_software_export(
                             wave_data['software_list'],
                             tested_software_df,
                             tested_software_column,
+                            processor.original_df,
+                            processor.software_column,
+                            software_family_column,
                             f'Волна {wave_num}'
                         )
                         
@@ -185,7 +189,8 @@ def tabs(tab1, tab2, tab3, tab4, st, processor, optimizer, uploaded_file, export
                     with st.spinner("Создание Excel файла..."):
                         tested_software_df = st.session_state.get('tested_software_df', None)
                         tested_software_column = st.session_state.get('tested_software_column', None)
-                        excel_buffer = exporter.export_to_excel(results, uploaded_file.name, tested_software_df, tested_software_column)
+                        software_family_column = st.session_state.get('software_family_column', None)
+                        excel_buffer = exporter.export_to_excel(results, uploaded_file.name, tested_software_df, tested_software_column, software_family_column)
                         st.session_state.excel_buffer_greedy = excel_buffer
                         st.session_state.show_download_greedy = True
 
@@ -205,7 +210,8 @@ def tabs(tab1, tab2, tab3, tab4, st, processor, optimizer, uploaded_file, export
                         with st.spinner("Создание Excel файла..."):
                             tested_software_df = st.session_state.get('tested_software_df', None)
                             tested_software_column = st.session_state.get('tested_software_column', None)
-                            excel_buffer = exporter.export_to_excel(results, uploaded_file.name, tested_software_df, tested_software_column)
+                            software_family_column = st.session_state.get('software_family_column', None)
+                            excel_buffer = exporter.export_to_excel(results, uploaded_file.name, tested_software_df, tested_software_column, software_family_column)
                             st.session_state.excel_buffer_greedy = excel_buffer
                     
                     # Импортируем модальное окно
@@ -377,10 +383,14 @@ def tabs(tab1, tab2, tab3, tab4, st, processor, optimizer, uploaded_file, export
                         # Экспорт списка ПО
                         tested_software_df = st.session_state.get('tested_software_df', None)
                         tested_software_column = st.session_state.get('tested_software_column', None)
+                        software_family_column = st.session_state.get('software_family_column', None)
                         output_sw = exporter.create_software_export(
                             wave_data['software_list'],
                             tested_software_df,
                             tested_software_column,
+                            processor.original_df,
+                            processor.software_column,
+                            software_family_column,
                             f'Волна {wave_num}'
                         )
                         
@@ -435,7 +445,8 @@ def tabs(tab1, tab2, tab3, tab4, st, processor, optimizer, uploaded_file, export
                     with st.spinner("Создание Excel файла..."):
                         tested_software_df = st.session_state.get('tested_software_df', None)
                         tested_software_column = st.session_state.get('tested_software_column', None)
-                        excel_buffer = exporter.export_to_excel(results, uploaded_file.name, tested_software_df, tested_software_column)
+                        software_family_column = st.session_state.get('software_family_column', None)
+                        excel_buffer = exporter.export_to_excel(results, uploaded_file.name, tested_software_df, tested_software_column, software_family_column)
                         st.session_state.excel_buffer_ilp = excel_buffer
                         st.session_state.show_download_ilp = True
 
@@ -455,7 +466,8 @@ def tabs(tab1, tab2, tab3, tab4, st, processor, optimizer, uploaded_file, export
                         with st.spinner("Создание Excel файла..."):
                             tested_software_df = st.session_state.get('tested_software_df', None)
                             tested_software_column = st.session_state.get('tested_software_column', None)
-                            excel_buffer = exporter.export_to_excel(results, uploaded_file.name, tested_software_df, tested_software_column)
+                            software_family_column = st.session_state.get('software_family_column', None)
+                            excel_buffer = exporter.export_to_excel(results, uploaded_file.name, tested_software_df, tested_software_column, software_family_column)
                             st.session_state.excel_buffer_ilp = excel_buffer
                     
                     # Импортируем модальное окно
@@ -579,10 +591,14 @@ def tabs(tab1, tab2, tab3, tab4, st, processor, optimizer, uploaded_file, export
                 # Экспорт списка ПО
                 tested_software_df = st.session_state.get('tested_software_df', None)
                 tested_software_column = st.session_state.get('tested_software_column', None)
+                software_family_column = st.session_state.get('software_family_column', None)
                 output_sw = exporter.create_software_export(
                     list(results['software_set']),
                     tested_software_df,
                     tested_software_column,
+                    processor.original_df,
+                    processor.software_column,
+                    software_family_column,
                     'ПО'
                 )
                 
@@ -655,7 +671,8 @@ def tabs(tab1, tab2, tab3, tab4, st, processor, optimizer, uploaded_file, export
                         
                         tested_software_df = st.session_state.get('tested_software_df', None)
                         tested_software_column = st.session_state.get('tested_software_column', None)
-                        excel_buffer = exporter.export_to_excel(export_results, uploaded_file.name, tested_software_df, tested_software_column)
+                        software_family_column = st.session_state.get('software_family_column', None)
+                        excel_buffer = exporter.export_to_excel(export_results, uploaded_file.name, tested_software_df, tested_software_column, software_family_column)
                         st.session_state.excel_buffer_n_users_greedy = excel_buffer
                         st.session_state.show_download_n_users_greedy = True
 
@@ -690,7 +707,8 @@ def tabs(tab1, tab2, tab3, tab4, st, processor, optimizer, uploaded_file, export
                             }
                             tested_software_df = st.session_state.get('tested_software_df', None)
                             tested_software_column = st.session_state.get('tested_software_column', None)
-                            excel_buffer = exporter.export_to_excel(export_results, uploaded_file.name, tested_software_df, tested_software_column)
+                            software_family_column = st.session_state.get('software_family_column', None)
+                            excel_buffer = exporter.export_to_excel(export_results, uploaded_file.name, tested_software_df, tested_software_column, software_family_column)
                             st.session_state.excel_buffer_n_users_greedy = excel_buffer
                     
                     # Импортируем модальное окно
@@ -829,10 +847,14 @@ def tabs(tab1, tab2, tab3, tab4, st, processor, optimizer, uploaded_file, export
                 # Экспорт списка ПО
                 tested_software_df = st.session_state.get('tested_software_df', None)
                 tested_software_column = st.session_state.get('tested_software_column', None)
+                software_family_column = st.session_state.get('software_family_column', None)
                 output_sw = exporter.create_software_export(
                     list(results['software_set']),
                     tested_software_df,
                     tested_software_column,
+                    processor.original_df,
+                    processor.software_column,
+                    software_family_column,
                     'ПО'
                 )
                 
@@ -905,7 +927,8 @@ def tabs(tab1, tab2, tab3, tab4, st, processor, optimizer, uploaded_file, export
                         
                         tested_software_df = st.session_state.get('tested_software_df', None)
                         tested_software_column = st.session_state.get('tested_software_column', None)
-                        excel_buffer = exporter.export_to_excel(export_results, uploaded_file.name, tested_software_df, tested_software_column)
+                        software_family_column = st.session_state.get('software_family_column', None)
+                        excel_buffer = exporter.export_to_excel(export_results, uploaded_file.name, tested_software_df, tested_software_column, software_family_column)
                         st.session_state.excel_buffer_n_users_ilp = excel_buffer
                         st.session_state.show_download_n_users_ilp = True
 
@@ -940,7 +963,8 @@ def tabs(tab1, tab2, tab3, tab4, st, processor, optimizer, uploaded_file, export
                             }
                             tested_software_df = st.session_state.get('tested_software_df', None)
                             tested_software_column = st.session_state.get('tested_software_column', None)
-                            excel_buffer = exporter.export_to_excel(export_results, uploaded_file.name, tested_software_df, tested_software_column)
+                            software_family_column = st.session_state.get('software_family_column', None)
+                            excel_buffer = exporter.export_to_excel(export_results, uploaded_file.name, tested_software_df, tested_software_column, software_family_column)
                             st.session_state.excel_buffer_n_users_ilp = excel_buffer
                     
                     # Импортируем модальное окно

@@ -28,7 +28,8 @@ class Exporter:
         results: Dict,
         original_filename: str,
         tested_software_df: pd.DataFrame = None,
-        tested_software_column: str = None
+        tested_software_column: str = None,
+        software_family_column: str = None
     ) -> io.BytesIO:
         """
         Экспортировать результаты в Excel файл с тремя листами
@@ -36,8 +37,9 @@ class Exporter:
         Args:
             results: Результаты расчёта волн
             original_filename: Имя исходного файла
-            tested_software_df: DataFrame с протестированным ПО (столбцы: ПО, Статус)
+            tested_software_df: DataFrame с протестированным ПО (все колонки)
             tested_software_column: Название столбца с ПО в tested_software_df
+            software_family_column: Название столбца с семейством ПО в основном файле (для маппинга)
 
         Returns:
             BytesIO буфер с Excel файлом
@@ -59,41 +61,42 @@ class Exporter:
             ].apply(get_wave)
 
             # Присоединяем данные о протестированном ПО через маппинг
-            if tested_software_df is not None and not tested_software_df.empty and tested_software_column:
+            if tested_software_df is not None and not tested_software_df.empty and tested_software_column and software_family_column:
+                # Загружаем файл маппинга
                 try:
-                    # Загружаем файл маппинга
-                    # ascupo_name - названия из большого файла (пользователи)
-                    # eatool_name - названия из справочника с протестированным ПО
-                    mapping_df = pd.read_excel('mapping.excel')
+                    mapping_df = pd.read_excel('mapping.xlsx')
                     
-                    # Шаг 1: Присоединяем маппинг к данным пользователей
+                    # Создаем промежуточный DataFrame: маппинг + данные о протестированном ПО
+                    # mapping_df содержит: ascupo_name (из основного файла, семейство ПО) и eatool_name (из tested файла)
+                    tested_with_mapping = mapping_df.merge(
+                        tested_software_df,
+                        left_on='eatool_name',
+                        right_on=tested_software_column,
+                        how='inner'
+                    )
+                    
+                    # Теперь присоединяем к основным данным по ascupo_name (через столбец семейства ПО)
                     df_data = df_data.merge(
-                        mapping_df[['ascupo_name', 'eatool_name']],
-                        left_on=self.processor.software_column,
+                        tested_with_mapping,
+                        left_on=software_family_column,
                         right_on='ascupo_name',
                         how='left'
                     )
                     
-                    # Шаг 2: Присоединяем ВСЕ колонки из tested_software_df
+                    # Удаляем столбцы маппинга и дублирующий столбец ПО из tested файла
+                    columns_to_drop = ['ascupo_name', 'eatool_name', tested_software_column]
+                    df_data = df_data.drop(columns=[col for col in columns_to_drop if col in df_data.columns])
+                    
+                except FileNotFoundError:
+                    # Если файл маппинга не найден, делаем прямое соединение (старое поведение)
                     df_data = df_data.merge(
                         tested_software_df,
-                        left_on='eatool_name',
+                        left_on=self.processor.software_column,
                         right_on=tested_software_column,
                         how='left'
                     )
-                    
-                    # Удаляем служебные колонки
-                    columns_to_drop = ['ascupo_name', 'eatool_name']
-                    if tested_software_column != self.processor.software_column and tested_software_column in df_data.columns:
-                        columns_to_drop.append(tested_software_column)
-                    df_data = df_data.drop(columns=[col for col in columns_to_drop if col in df_data.columns])
-                        
-                except FileNotFoundError:
-                    # Если файл маппинга не найден, пропускаем присоединение
-                    pass
-                except Exception as e:
-                    # Логируем ошибку, но не прерываем экспорт
-                    print(f"Ошибка при загрузке маппинга: {e}")
+                    if tested_software_column != self.processor.software_column:
+                        df_data = df_data.drop(columns=[tested_software_column])
 
             # Переименовываем ключевые колонки в стандартные имена
             rename_map = {
@@ -172,6 +175,9 @@ class Exporter:
         software_list: List[str],
         tested_software_df: pd.DataFrame = None,
         tested_software_column: str = None,
+        original_df: pd.DataFrame = None,
+        software_column: str = None,
+        software_family_column: str = None,
         sheet_name: str = 'ПО'
     ) -> io.BytesIO:
         """
@@ -179,8 +185,11 @@ class Exporter:
 
         Args:
             software_list: Список ПО для экспорта
-            tested_software_df: DataFrame с протестированным ПО (столбцы: ПО, Статус)
+            tested_software_df: DataFrame с протестированным ПО (все колонки)
             tested_software_column: Название столбца с ПО в tested_software_df
+            original_df: Исходный DataFrame с данными пользователей (для получения семейств ПО)
+            software_column: Название столбца с ПО в исходном файле
+            software_family_column: Название столбца с семейством ПО в исходном файле
             sheet_name: Название листа в Excel
 
         Returns:
@@ -193,39 +202,52 @@ class Exporter:
 
         # Присоединяем данные о протестированном ПО через маппинг
         # Проверяем что это DataFrame, а не set (для обратной совместимости)
-        if tested_software_df is not None and isinstance(tested_software_df, pd.DataFrame) and not tested_software_df.empty and tested_software_column:
+        if tested_software_df is not None and isinstance(tested_software_df, pd.DataFrame) and not tested_software_df.empty and tested_software_column and original_df is not None and software_column and software_family_column:
             try:
                 # Загружаем файл маппинга
-                mapping_df = pd.read_excel('mapping.excel')
+                mapping_df = pd.read_excel('mapping.xlsx')
                 
-                # Шаг 1: Присоединяем маппинг к списку ПО
+                # Получаем уникальные пары: ПО -> Семейство ПО из исходного файла
+                software_to_family = original_df[[software_column, software_family_column]].drop_duplicates()
+                
+                # Добавляем семейство ПО к нашему списку
                 df_software = df_software.merge(
-                    mapping_df[['ascupo_name', 'eatool_name']],
+                    software_to_family,
                     left_on='ПО для тестирования',
+                    right_on=software_column,
+                    how='left'
+                )
+                
+                # Создаем промежуточный DataFrame: маппинг + данные о протестированном ПО
+                tested_with_mapping = mapping_df.merge(
+                    tested_software_df,
+                    left_on='eatool_name',
+                    right_on=tested_software_column,
+                    how='inner'
+                )
+                
+                # Присоединяем к списку ПО по семейству (ascupo_name)
+                df_software = df_software.merge(
+                    tested_with_mapping,
+                    left_on=software_family_column,
                     right_on='ascupo_name',
                     how='left'
                 )
                 
-                # Шаг 2: Присоединяем ВСЕ колонки из tested_software_df
+                # Удаляем столбцы маппинга, дублирующий столбец ПО из tested файла и дублирующий столбец ПО из исходного файла
+                columns_to_drop = ['ascupo_name', 'eatool_name', tested_software_column, software_column]
+                df_software = df_software.drop(columns=[col for col in columns_to_drop if col in df_software.columns])
+                
+            except FileNotFoundError:
+                # Если файл маппинга не найден, делаем прямое соединение (старое поведение)
                 df_software = df_software.merge(
                     tested_software_df,
-                    left_on='eatool_name',
+                    left_on='ПО для тестирования',
                     right_on=tested_software_column,
                     how='left'
                 )
-                
-                # Удаляем служебные колонки
-                columns_to_drop = ['ascupo_name', 'eatool_name']
-                if tested_software_column != 'ПО для тестирования' and tested_software_column in df_software.columns:
-                    columns_to_drop.append(tested_software_column)
-                df_software = df_software.drop(columns=[col for col in columns_to_drop if col in df_software.columns])
-                    
-            except FileNotFoundError:
-                # Если файл маппинга не найден, пропускаем присоединение
-                pass
-            except Exception as e:
-                # Логируем ошибку, но не прерываем экспорт
-                print(f"Ошибка при загрузке маппинга: {e}")
+                if tested_software_column != 'ПО для тестирования':
+                    df_software = df_software.drop(columns=[tested_software_column])
 
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:

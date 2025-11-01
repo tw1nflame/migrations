@@ -1,0 +1,5 @@
+tested_software_df is None: False
+tested_software_column: Наименование ПО
+software_family_column: Short_name
+tested_software_df строк: 30
+tested_software_df колонки: ['Наименование ПО', 'Статус']

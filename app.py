@@ -173,6 +173,17 @@ with st.sidebar:
                 key="software_column_main"
             )
             
+            # Если загружен файл с протестированным ПО, нужно выбрать столбец с семейством ПО для маппинга
+            software_family_column = None
+            if tested_software_file is not None:
+                software_family_column = st.selectbox(
+                    "Столбец с семейством ПО (для маппинга с протестированным ПО)",
+                    options=columns,
+                    index=2 if len(columns) > 2 else 0,  # По умолчанию третий столбец (индекс 2)
+                    help="Столбец с семейством ПО, значения которого совпадают с ascupo_name в файле маппинга",
+                    key="software_family_column_main"
+                )
+            
             # Кнопка обработки данных
             if st.button("📊 Обработать данные", type="primary", width="stretch"):
                 with st.spinner("Обработка данных..."):
@@ -193,13 +204,14 @@ with st.sidebar:
                                 except:
                                     tested_df = pd.read_excel(tested_software_file)
                             
-                            # Оставляем только нужные столбцы и убираем пустые значения ПО
-                            tested_df_clean = tested_df[[tested_software_column, tested_status_column]].dropna(subset=[tested_software_column])
+                            # Оставляем ВСЕ столбцы и убираем строки с пустыми значениями в столбце ПО
+                            tested_df_clean = tested_df.dropna(subset=[tested_software_column])
                             
                             st.session_state.tested_software_df = tested_df_clean
                             st.session_state.tested_software_column = tested_software_column
                             st.session_state.tested_status_column = tested_status_column
                             st.session_state.tested_software_file_name = tested_software_file.name
+                            st.session_state.software_family_column = software_family_column
                             
                         except Exception as e:
                             st.warning(f"⚠️ Ошибка при загрузке файла с протестированным ПО: {e}")
@@ -207,11 +219,13 @@ with st.sidebar:
                             st.session_state.tested_software_column = None
                             st.session_state.tested_status_column = None
                             st.session_state.tested_software_file_name = None
+                            st.session_state.software_family_column = None
                     else:
                         st.session_state.tested_software_df = None
                         st.session_state.tested_software_column = None
                         st.session_state.tested_status_column = None
                         st.session_state.tested_software_file_name = None
+                        st.session_state.software_family_column = None
 
                     st.session_state.processor = processor
                     st.session_state.data_loaded = True

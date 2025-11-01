@@ -1,9 +1,9 @@
 [server]
-fileWatcherType = "none"
+fileWatcherType = "auto"
 headless = true
 
 [runner]
-fastReruns = false
+fastReruns = true
 magicEnabled = false
 
 [browser]
