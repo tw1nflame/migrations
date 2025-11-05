@@ -118,8 +118,8 @@ class Exporter:
             else:
                 # Нет tested_software - просто переименовываем и добавляем wave
                 df_data = self.processor.original_df.copy()
+                df_data['wave'] = wave_series  # Добавляем wave ДО переименования
                 df_data = df_data.rename(columns=rename_map)
-                df_data['wave'] = wave_series
             
             # ОПТИМИЗАЦИЯ: Для очень больших файлов записываем по частям
             # xlsxwriter автоматически записывает напрямую в файл без загрузки всего в память
@@ -344,8 +344,9 @@ class Exporter:
         # Сброс указателя буфера в начало
         excel_buffer.seek(0)
 
-        # Чтение всех листов из Excel
-        excel_data = pd.read_excel(excel_buffer, sheet_name=None, engine='openpyxl')
+        # ОПТИМИЗАЦИЯ: Читаем только первый лист (основные данные)
+        # Не загружаем все листы в память
+        df = pd.read_excel(excel_buffer, sheet_name=0, engine='openpyxl')
 
         # Создание строки подключения
         connection_string = f"postgresql://{user}:{password}@{host}:{port}/{database}"
@@ -361,24 +362,64 @@ class Exporter:
                     if if_exists == 'replace':
                         connection.execute(text(f"DROP TABLE IF EXISTS {schema}.{table} CASCADE"))
 
-            first_sheet_name = list(excel_data.keys())[0]
-            df = excel_data[first_sheet_name]
+            # ОПТИМИЗАЦИЯ: Используем PostgreSQL COPY - в 10-50 раз быстрее INSERT
+            # Заменяем NaN на None для корректной обработки
+            df = df.where(pd.notna(df), None)
             
-            # Заменяем пустые строки и NaN на None (NULL в SQL)
-            df = df.replace('', None)
-            df = df.replace('nan', None)
-            df = df.where(pd.notna(df), None)  # Заменяем все NaN на None (pandas 2.0+)
-            
-            # Используем 'fail' вместо 'replace' т.к. мы уже удалили таблицу выше
-            df.to_sql(
+            # Создаем таблицу через to_sql с небольшим набором данных для правильного определения типов
+            # Берем первые 100 строк для анализа типов данных
+            sample_size = min(100, len(df))
+            df.head(sample_size).to_sql(
                 name=table,
                 con=engine,
                 schema=schema,
                 if_exists='fail' if if_exists == 'replace' else if_exists,
                 index=False,
                 method='multi',
-                chunksize=1000
+                chunksize=sample_size
             )
+            
+            # Если данных больше чем sample, используем COPY для остальных
+            if len(df) > sample_size:
+                from io import StringIO
+                
+                # Берем оставшиеся данные
+                remaining_df = df.iloc[sample_size:]
+                
+                # Подготовка CSV буфера для COPY
+                output = StringIO()
+                remaining_df.to_csv(output, sep='\t', header=False, index=False, na_rep='')
+                output.seek(0)
+                
+                # Выполняем COPY через raw connection
+                raw_conn = engine.raw_connection()
+                try:
+                    cursor = raw_conn.cursor()
+                    
+                    # Отключаем триггеры для максимальной скорости (если есть)
+                    try:
+                        cursor.execute(f"ALTER TABLE {schema}.{table} DISABLE TRIGGER ALL")
+                    except:
+                        pass  # Игнорируем если нет триггеров
+                    
+                    # COPY данных (самая быстрая операция в PostgreSQL)
+                    # Используем CSV формат с правильным экранированием
+                    columns = ', '.join([f'"{col}"' for col in df.columns])
+                    cursor.copy_expert(
+                        f"COPY {schema}.{table} ({columns}) FROM STDIN WITH (FORMAT CSV, DELIMITER E'\\t', NULL '', QUOTE '\"', ESCAPE '\"')",
+                        output
+                    )
+                    
+                    # Включаем триггеры обратно
+                    try:
+                        cursor.execute(f"ALTER TABLE {schema}.{table} ENABLE TRIGGER ALL")
+                    except:
+                        pass
+                    
+                    raw_conn.commit()
+                    cursor.close()
+                finally:
+                    raw_conn.close()
 
         except Exception as e:
             raise Exception(f"Ошибка при экспорте в базу данных: {e}") from e
