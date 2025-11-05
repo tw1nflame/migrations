@@ -126,11 +126,21 @@ class MigrationOptimizer:
             # Выбираем алгоритм оптимизации
             if use_ilp:
                 ilp_solver = ILPSoftwareSelector(self.processor)
+                
+                # Сначала вычисляем эвристическое решение для теплого старта
+                greedy_solution, greedy_arms = self.find_best_software_set(
+                    limit=limit,
+                    already_tested=tested_software,
+                    remaining_arms=remaining_arms - migrated_arms
+                )
+                
+                # Используем эвристическое решение как warm start
                 wave_software, wave_arms = ilp_solver.find_best_software_set_ilp(
                     limit=limit,
                     already_tested=tested_software,
                     remaining_arms=remaining_arms - migrated_arms,
-                    time_limit=time_limit / n_waves
+                    time_limit=time_limit / n_waves,
+                    warm_start_solution=greedy_solution
                 )
             else:
                 wave_software, wave_arms = self.find_best_software_set(

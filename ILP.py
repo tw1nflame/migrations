@@ -19,7 +19,8 @@ class ILPSoftwareSelector:
         already_tested: Set[str],
         remaining_arms: Set[str],
         selection_bonus: float = 0.001,
-        time_limit: Optional[int] = None
+        time_limit: Optional[int] = None,
+        warm_start_solution: Optional[Set[str]] = None
     ) -> Tuple[Set[str], Set[str]]:
         """
         Находит оптимальный набор ПО, максимизируя количество ПОЛНОСТЬЮ покрытых АРМов.
@@ -27,6 +28,7 @@ class ILPSoftwareSelector:
         Args:
             time_limit: Максимальное время работы решателя в секундах (None = без ограничения).
                        При ограничении времени решатель может вернуть неоптимальное, но допустимое решение.
+            warm_start_solution: Опциональное стартовое решение (набор ПО) для ускорения ILP.
         """
         available_software = list(
             set(self.processor.software_to_arms.keys()) - already_tested
@@ -44,6 +46,11 @@ class ILPSoftwareSelector:
             sw: LpVariable(f"sw_{i}", cat=LpBinary)
             for i, sw in enumerate(available_software)
         }
+        
+        # Задаем начальные значения из warm start (если есть)
+        if warm_start_solution:
+            for sw in available_software:
+                x[sw].setInitialValue(1 if sw in warm_start_solution else 0)
         
         # z[arm] = 1 если АРМ `arm` полностью покрыт, 0 иначе
         z = {
