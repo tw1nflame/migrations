@@ -186,13 +186,17 @@ def tabs(tab1, tab2, tab3, tab4, st, processor, optimizer, uploaded_file, export
             
             with col_export1:
                 if st.button("💾 Экспортировать результаты в Excel", key="export_greedy", width="stretch"):
-                    with st.spinner("Создание Excel файла..."):
-                        tested_software_df = st.session_state.get('tested_software_df', None)
-                        tested_software_column = st.session_state.get('tested_software_column', None)
-                        software_family_column = st.session_state.get('software_family_column', None)
-                        excel_buffer = exporter.export_to_excel(results, uploaded_file.name, tested_software_df, tested_software_column, software_family_column)
-                        st.session_state.excel_buffer_greedy = excel_buffer
-                        st.session_state.show_download_greedy = True
+                    try:
+                        with st.spinner("Создание Excel файла..."):
+                            tested_software_df = st.session_state.get('tested_software_df', None)
+                            tested_software_column = st.session_state.get('tested_software_column', None)
+                            software_family_column = st.session_state.get('software_family_column', None)
+                            excel_buffer = exporter.export_to_excel(results, uploaded_file.name, tested_software_df, tested_software_column, software_family_column)
+                            st.session_state.excel_buffer_greedy = excel_buffer
+                            st.session_state.show_download_greedy = True
+                            st.success("✓ Excel файл готов к скачиванию!")
+                    except Exception as e:
+                        st.error(f"❌ Ошибка при создании Excel файла: {str(e)}")
 
                 if st.session_state.get('show_download_greedy', False):
                     st.download_button(
@@ -442,13 +446,17 @@ def tabs(tab1, tab2, tab3, tab4, st, processor, optimizer, uploaded_file, export
             
             with col_export1:
                 if st.button("💾 Экспортировать результаты в Excel", key="export_ilp", width="stretch"):
-                    with st.spinner("Создание Excel файла..."):
-                        tested_software_df = st.session_state.get('tested_software_df', None)
-                        tested_software_column = st.session_state.get('tested_software_column', None)
-                        software_family_column = st.session_state.get('software_family_column', None)
-                        excel_buffer = exporter.export_to_excel(results, uploaded_file.name, tested_software_df, tested_software_column, software_family_column)
-                        st.session_state.excel_buffer_ilp = excel_buffer
-                        st.session_state.show_download_ilp = True
+                    try:
+                        with st.spinner("Создание Excel файла..."):
+                            tested_software_df = st.session_state.get('tested_software_df', None)
+                            tested_software_column = st.session_state.get('tested_software_column', None)
+                            software_family_column = st.session_state.get('software_family_column', None)
+                            excel_buffer = exporter.export_to_excel(results, uploaded_file.name, tested_software_df, tested_software_column, software_family_column)
+                            st.session_state.excel_buffer_ilp = excel_buffer
+                            st.session_state.show_download_ilp = True
+                            st.success("✓ Excel файл готов к скачиванию!")
+                    except Exception as e:
+                        st.error(f"❌ Ошибка при создании Excel файла: {str(e)}")
 
                 if st.session_state.get('show_download_ilp', False):
                     st.download_button(
@@ -651,30 +659,34 @@ def tabs(tab1, tab2, tab3, tab4, st, processor, optimizer, uploaded_file, export
             
             with col_export1:
                 if st.button("💾 Экспортировать полный отчет в Excel", key="export_min_coverage_greedy", width="stretch"):
-                    with st.spinner("Создание Excel файла..."):
-                        # Формируем данные в формате, совместимом с export_to_excel
-                        export_results = {
-                            'waves': [{
-                                'wave_number': 1,
-                                'software_selected': results['software_count'],
-                                'software_list': list(results['software_set']),
-                                'arms_migrated': results['actual_coverage'],
-                                'arms_list': list(results['covered_arms'])
-                            }],
-                            'total_tested_software': results['software_count'],
-                            'total_migrated_arms': results['actual_coverage'],
-                            'software_wave_map': {sw: 1 for sw in results['software_set']},
-                            'arm_wave_map': {arm: 1 for arm in results['covered_arms']},
-                            'tested_software': results['software_set'],
-                            'migrated_arms': results['covered_arms']
-                        }
-                        
-                        tested_software_df = st.session_state.get('tested_software_df', None)
-                        tested_software_column = st.session_state.get('tested_software_column', None)
-                        software_family_column = st.session_state.get('software_family_column', None)
-                        excel_buffer = exporter.export_to_excel(export_results, uploaded_file.name, tested_software_df, tested_software_column, software_family_column)
-                        st.session_state.excel_buffer_n_users_greedy = excel_buffer
-                        st.session_state.show_download_n_users_greedy = True
+                    try:
+                        with st.spinner("Создание Excel файла..."):
+                            # Формируем данные в формате, совместимом с export_to_excel
+                            export_results = {
+                                'waves': [{
+                                    'wave_number': 1,
+                                    'software_selected': results['software_count'],
+                                    'software_list': list(results['software_set']),
+                                    'arms_migrated': results['actual_coverage'],
+                                    'arms_list': list(results['covered_arms'])
+                                }],
+                                'total_tested_software': results['software_count'],
+                                'total_migrated_arms': results['actual_coverage'],
+                                'software_wave_map': {sw: 1 for sw in results['software_set']},
+                                'arm_wave_map': {arm: 1 for arm in results['covered_arms']},
+                                'tested_software': results['software_set'],
+                                'migrated_arms': results['covered_arms']
+                            }
+                            
+                            tested_software_df = st.session_state.get('tested_software_df', None)
+                            tested_software_column = st.session_state.get('tested_software_column', None)
+                            software_family_column = st.session_state.get('software_family_column', None)
+                            excel_buffer = exporter.export_to_excel(export_results, uploaded_file.name, tested_software_df, tested_software_column, software_family_column)
+                            st.session_state.excel_buffer_n_users_greedy = excel_buffer
+                            st.session_state.show_download_n_users_greedy = True
+                            st.success("✓ Excel файл готов к скачиванию!")
+                    except Exception as e:
+                        st.error(f"❌ Ошибка при создании Excel файла: {str(e)}")
 
                 if st.session_state.get('show_download_n_users_greedy', False):
                     st.download_button(
@@ -907,30 +919,34 @@ def tabs(tab1, tab2, tab3, tab4, st, processor, optimizer, uploaded_file, export
             
             with col_export1:
                 if st.button("💾 Экспортировать полный отчет в Excel", key="export_min_coverage_ilp", width="stretch"):
-                    with st.spinner("Создание Excel файла..."):
-                        # Формируем данные в формате, совместимом с export_to_excel
-                        export_results = {
-                            'waves': [{
-                                'wave_number': 1,
-                                'software_selected': results['software_count'],
-                                'software_list': list(results['software_set']),
-                                'arms_migrated': results['actual_coverage'],
-                                'arms_list': list(results['covered_arms'])
-                            }],
-                            'total_tested_software': results['software_count'],
-                            'total_migrated_arms': results['actual_coverage'],
-                            'software_wave_map': {sw: 1 for sw in results['software_set']},
-                            'arm_wave_map': {arm: 1 for arm in results['covered_arms']},
-                            'tested_software': results['software_set'],
-                            'migrated_arms': results['covered_arms']
-                        }
-                        
-                        tested_software_df = st.session_state.get('tested_software_df', None)
-                        tested_software_column = st.session_state.get('tested_software_column', None)
-                        software_family_column = st.session_state.get('software_family_column', None)
-                        excel_buffer = exporter.export_to_excel(export_results, uploaded_file.name, tested_software_df, tested_software_column, software_family_column)
-                        st.session_state.excel_buffer_n_users_ilp = excel_buffer
-                        st.session_state.show_download_n_users_ilp = True
+                    try:
+                        with st.spinner("Создание Excel файла..."):
+                            # Формируем данные в формате, совместимом с export_to_excel
+                            export_results = {
+                                'waves': [{
+                                    'wave_number': 1,
+                                    'software_selected': results['software_count'],
+                                    'software_list': list(results['software_set']),
+                                    'arms_migrated': results['actual_coverage'],
+                                    'arms_list': list(results['covered_arms'])
+                                }],
+                                'total_tested_software': results['software_count'],
+                                'total_migrated_arms': results['actual_coverage'],
+                                'software_wave_map': {sw: 1 for sw in results['software_set']},
+                                'arm_wave_map': {arm: 1 for arm in results['covered_arms']},
+                                'tested_software': results['software_set'],
+                                'migrated_arms': results['covered_arms']
+                            }
+                            
+                            tested_software_df = st.session_state.get('tested_software_df', None)
+                            tested_software_column = st.session_state.get('tested_software_column', None)
+                            software_family_column = st.session_state.get('software_family_column', None)
+                            excel_buffer = exporter.export_to_excel(export_results, uploaded_file.name, tested_software_df, tested_software_column, software_family_column)
+                            st.session_state.excel_buffer_n_users_ilp = excel_buffer
+                            st.session_state.show_download_n_users_ilp = True
+                            st.success("✓ Excel файл готов к скачиванию!")
+                    except Exception as e:
+                        st.error(f"❌ Ошибка при создании Excel файла: {str(e)}")
 
                 if st.session_state.get('show_download_n_users_ilp', False):
                     st.download_button(
