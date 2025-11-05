@@ -31,13 +31,17 @@ if 'exporter' not in st.session_state:
     st.session_state.exporter = None
 # Кэш для загруженных файлов (чтобы не перечитывать при смене колонок)
 if 'uploaded_df' not in st.session_state:
-    st.session_state.uploaded_df = None
+    st.session_state.uploaded_df = None  # Заголовки
 if 'uploaded_file_name' not in st.session_state:
     st.session_state.uploaded_file_name = None
+if 'uploaded_df_full' not in st.session_state:
+    st.session_state.uploaded_df_full = None  # Полный файл (после обработки)
 if 'tested_df_preview' not in st.session_state:
-    st.session_state.tested_df_preview = None
+    st.session_state.tested_df_preview = None  # Заголовки
 if 'tested_file_name' not in st.session_state:
     st.session_state.tested_file_name = None
+if 'tested_df_full' not in st.session_state:
+    st.session_state.tested_df_full = None  # Полный файл (после загрузки)
 
 # Sidebar для загрузки данных
 with st.sidebar:
@@ -53,9 +57,17 @@ with st.sidebar:
         key="users_file"
     )
     
-    # Очистка кэша при удалении файла
-    if uploaded_file is None and st.session_state.uploaded_df is not None:
+    # Очистка кэша при удалении или смене файла
+    if uploaded_file is None:
+        # Файл удалён - очищаем весь кэш
+        if st.session_state.uploaded_df is not None:
+            st.session_state.uploaded_df = None
+            st.session_state.uploaded_df_full = None
+            st.session_state.uploaded_file_name = None
+    elif st.session_state.uploaded_file_name is not None and uploaded_file.name != st.session_state.uploaded_file_name:
+        # Файл сменился - очищаем весь кэш
         st.session_state.uploaded_df = None
+        st.session_state.uploaded_df_full = None
         st.session_state.uploaded_file_name = None
     
     tested_software_file = st.file_uploader(
@@ -65,9 +77,17 @@ with st.sidebar:
         key="tested_software_file"
     )
     
-    # Очистка кэша при удалении файла с протестированным ПО
-    if tested_software_file is None and st.session_state.tested_df_preview is not None:
+    # Очистка кэша при удалении или смене файла с протестированным ПО
+    if tested_software_file is None:
+        # Файл удалён - очищаем весь кэш
+        if st.session_state.tested_df_preview is not None:
+            st.session_state.tested_df_preview = None
+            st.session_state.tested_df_full = None
+            st.session_state.tested_file_name = None
+    elif st.session_state.tested_file_name is not None and tested_software_file.name != st.session_state.tested_file_name:
+        # Файл сменился - очищаем весь кэш
         st.session_state.tested_df_preview = None
+        st.session_state.tested_df_full = None
         st.session_state.tested_file_name = None
     
     # Выбор столбцов для файла с протестированным ПО (если загружен)
@@ -79,7 +99,7 @@ with st.sidebar:
         st.info(f"📄 Файл выбран: {tested_software_file.name}")
         
         # Загружаем только заголовки для выбора колонок (быстро, без полной загрузки)
-        if st.session_state.tested_file_name != tested_software_file.name or st.session_state.tested_df_preview is None:
+        if st.session_state.tested_df_preview is None:
             with st.spinner("Чтение заголовков..."):
                 if tested_software_file.name.endswith('.csv'):
                     # Читаем только первую строку для получения заголовков
@@ -123,14 +143,22 @@ with st.sidebar:
         # Кнопка для загрузки протестированного ПО в БД
         if st.button("🗄️ Загрузить список протестированного ПО в БД", key="export_tested_software_db_sidebar", type="primary"):
             with st.spinner("Загрузка файла с протестированным ПО..."):
-                # ЗДЕСЬ загружаем полный файл с протестированным ПО
-                if tested_software_file.name.endswith('.csv'):
-                    tested_df_full = pd.read_csv(tested_software_file, encoding='utf-8-sig')
+                # ЗДЕСЬ загружаем полный файл с протестированным ПО (если еще не загружен)
+                if st.session_state.tested_df_full is None or st.session_state.tested_file_name != tested_software_file.name:
+                    # Загружаем полный файл первый раз или если файл сменился
+                    if tested_software_file.name.endswith('.csv'):
+                        tested_df_full = pd.read_csv(tested_software_file, encoding='utf-8-sig')
+                    else:
+                        try:
+                            tested_df_full = pd.read_excel(tested_software_file, sheet_name='ПО')
+                        except:
+                            tested_df_full = pd.read_excel(tested_software_file)
+                    
+                    # Кэшируем полный файл
+                    st.session_state.tested_df_full = tested_df_full
                 else:
-                    try:
-                        tested_df_full = pd.read_excel(tested_software_file, sheet_name='ПО')
-                    except:
-                        tested_df_full = pd.read_excel(tested_software_file)
+                    # Используем кэшированный полный файл
+                    tested_df_full = st.session_state.tested_df_full
                 
                 # Берем ВСЕ столбцы и убираем строки с пустыми значениями в столбце ПО
                 tested_df_clean = tested_df_full.dropna(subset=[tested_software_column])
@@ -183,7 +211,7 @@ with st.sidebar:
             st.info(f"📄 Файл выбран: {uploaded_file.name}")
             
             # Загружаем только заголовки для выбора колонок (быстро, без полной загрузки)
-            if st.session_state.uploaded_file_name != uploaded_file.name or st.session_state.uploaded_df is None:
+            if st.session_state.uploaded_df is None:
                 with st.spinner("Чтение заголовков..."):
                     if uploaded_file.name.endswith('.csv'):
                         # Читаем только первую строку для получения заголовков
@@ -238,11 +266,19 @@ with st.sidebar:
             # Кнопка обработки данных
             if st.button("📊 Обработать данные", type="primary", width="stretch"):
                 with st.spinner("Загрузка и обработка данных..."):
-                    # ЗДЕСЬ загружаем полный файл (после нажатия кнопки)
-                    if uploaded_file.name.endswith('.csv'):
-                        df_full = pd.read_csv(uploaded_file, encoding='utf-8-sig')
+                    # ЗДЕСЬ загружаем полный файл (если еще не загружен или файл сменился)
+                    if st.session_state.uploaded_df_full is None:
+                        # Загружаем полный файл
+                        if uploaded_file.name.endswith('.csv'):
+                            df_full = pd.read_csv(uploaded_file, encoding='utf-8-sig')
+                        else:
+                            df_full = pd.read_excel(uploaded_file)
+                        
+                        # Кэшируем полный файл
+                        st.session_state.uploaded_df_full = df_full
                     else:
-                        df_full = pd.read_excel(uploaded_file)
+                        # Используем кэшированный полный файл
+                        df_full = st.session_state.uploaded_df_full
                     
                     # Обработка основного файла с пользователями
                     processor = DataProcessor(df_full, arm_column, software_column)
@@ -251,15 +287,23 @@ with st.sidebar:
                     # Обработка файла с протестированным ПО (если загружен)
                     if tested_software_file is not None and tested_software_column is not None and tested_status_column is not None:
                         try:
-                            # Загрузка файла с протестированным ПО
-                            if tested_software_file.name.endswith('.csv'):
-                                tested_df = pd.read_csv(tested_software_file, encoding='utf-8-sig')
+                            # Загрузка файла с протестированным ПО (если еще не загружен или файл сменился)
+                            if st.session_state.tested_df_full is None:
+                                # Загружаем полный файл
+                                if tested_software_file.name.endswith('.csv'):
+                                    tested_df = pd.read_csv(tested_software_file, encoding='utf-8-sig')
+                                else:
+                                    # Пытаемся прочитать лист "ПО", если не найден - читаем первый лист
+                                    try:
+                                        tested_df = pd.read_excel(tested_software_file, sheet_name='ПО')
+                                    except:
+                                        tested_df = pd.read_excel(tested_software_file)
+                                
+                                # Кэшируем полный файл
+                                st.session_state.tested_df_full = tested_df
                             else:
-                                # Пытаемся прочитать лист "ПО", если не найден - читаем первый лист
-                                try:
-                                    tested_df = pd.read_excel(tested_software_file, sheet_name='ПО')
-                                except:
-                                    tested_df = pd.read_excel(tested_software_file)
+                                # Используем кэшированный полный файл
+                                tested_df = st.session_state.tested_df_full
                             
                             # Оставляем ВСЕ столбцы и убираем строки с пустыми значениями в столбце ПО
                             tested_df_clean = tested_df.dropna(subset=[tested_software_column])

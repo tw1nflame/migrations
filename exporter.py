@@ -214,7 +214,14 @@ class Exporter:
                 mapping_columns = list(mapping_df.columns)
                 
                 # Получаем уникальные пары: ПО -> Семейство ПО из исходного файла
-                software_to_family = original_df[[software_column, software_family_column]].drop_duplicates()
+                # Проверяем: если это одна и та же колонка, берём её один раз
+                if software_column == software_family_column:
+                    # Одна и та же колонка - берём один раз, избегая дублирования имён
+                    software_to_family = original_df[[software_column]].drop_duplicates()
+                    # Переименуем для единообразия (software_family_column будет указывать на ту же колонку)
+                else:
+                    # Разные колонки - берём обе
+                    software_to_family = original_df[[software_column, software_family_column]].drop_duplicates()
                 
                 # Добавляем семейство ПО к нашему списку
                 df_software = df_software.merge(
