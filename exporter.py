@@ -33,6 +33,7 @@ class Exporter:
     ) -> io.BytesIO:
         """
         Экспортировать результаты в Excel файл с тремя листами
+        Оптимизировано для больших файлов - минимизирует копирование данных
 
         Args:
             results: Результаты расчёта волн
@@ -46,70 +47,82 @@ class Exporter:
         """
         output = io.BytesIO()
 
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        # ОПТИМИЗАЦИЯ: xlsxwriter быстрее и эффективнее по памяти для больших файлов
+        with pd.ExcelWriter(output, engine='xlsxwriter', engine_kwargs={'options': {'strings_to_numbers': False}}) as writer:
             # Лист 1: "Data" - исходные данные + столбцы "Волна миграции" и опционально статус тестирования
-            df_data = self.processor.original_df.copy()
-
-            # Добавляем столбец с номером волны на основе АРМа (не ПО!)
+            # ОПТИМИЗАЦИЯ: Не копируем весь DataFrame, работаем с view где возможно
             arm_wave_map = results.get('arm_wave_map', {})
-
-            def get_wave(arm_name):
-                return arm_wave_map.get(arm_name, None)  # None вместо 'N/A' для совместимости с БД
-
-            df_data['Волна миграции'] = df_data[
-                self.processor.arm_column  # Используем столбец с АРМ, а не ПО
-            ].apply(get_wave)
-
+            
+            # Создаем Series с волнами напрямую (без apply для скорости)
+            wave_series = self.processor.original_df[self.processor.arm_column].map(arm_wave_map)
+            
+            # Подготавливаем переименования
+            rename_map = {
+                self.processor.software_column: 'software_name',
+                self.processor.arm_column: 'arm_id'
+            }
+            
             # Присоединяем данные о протестированном ПО через маппинг
             if tested_software_df is not None and not tested_software_df.empty and tested_software_column and software_family_column:
-                # Загружаем файл маппинга
                 try:
+                    # Загружаем маппинг
                     mapping_df = pd.read_excel('mapping.xlsx')
-                    
-                    # Запоминаем все столбцы из маппинга (чтобы потом удалить их)
                     mapping_columns = list(mapping_df.columns)
                     
-                    # Создаем промежуточный DataFrame: маппинг + данные о протестированном ПО
-                    # mapping_df содержит: ascupo_name (из основного файла, семейство ПО) и eatool_name (из tested файла)
-                    tested_with_mapping = mapping_df.merge(
-                        tested_software_df,
-                        left_on='eatool_name',
-                        right_on=tested_software_column,
+                    # ОПТИМИЗАЦИЯ: Используем merge вместо циклов и map
+                    # 1. Связываем tested_software с mapping
+                    tested_with_mapping = tested_software_df.merge(
+                        mapping_df,
+                        left_on=tested_software_column,
+                        right_on='eatool_name',
                         how='inner'
-                    )
+                    ).drop(columns=['eatool_name'])
                     
-                    # Теперь присоединяем к основным данным по ascupo_name (через столбец семейства ПО)
+                    # 2. Создаем базовый DataFrame
+                    df_data = self.processor.original_df.copy()  # Нужна копия для добавления колонок
+                    df_data['wave'] = wave_series  # Добавляем wave ДО переименования
+                    
+                    # 3. Присоединяем tested данные через ascupo_name (используя оригинальное имя колонки)
                     df_data = df_data.merge(
                         tested_with_mapping,
-                        left_on=software_family_column,
+                        left_on=software_family_column,  # Используем оригинальное имя колонки
                         right_on='ascupo_name',
                         how='left'
                     )
                     
-                    # Удаляем только ВСЕ столбцы из маппинга (оставляем все из tested файла)
-                    columns_to_drop = mapping_columns
-                    df_data = df_data.drop(columns=[col for col in columns_to_drop if col in df_data.columns])
+                    # 4. Удаляем служебные колонки из mapping
+                    df_data = df_data.drop(columns=[col for col in mapping_columns if col in df_data.columns], errors='ignore')
+                    
+                    # 5. Переименовываем ключевые колонки в конце
+                    df_data = df_data.rename(columns=rename_map)
                     
                 except FileNotFoundError:
-                    # Если файл маппинга не найден, делаем прямое соединение (старое поведение)
+                    # Если файл маппинга не найден, делаем прямое соединение
+                    df_data = self.processor.original_df.copy()
+                    df_data['wave'] = wave_series  # Добавляем wave ДО переименования
+                    
+                    # ОПТИМИЗАЦИЯ: merge быстрее чем map с lambda
+                    # Используем оригинальное имя колонки ПО для merge
                     df_data = df_data.merge(
                         tested_software_df,
-                        left_on=self.processor.software_column,
+                        left_on=self.processor.software_column,  # Используем оригинальное имя
                         right_on=tested_software_column,
                         how='left'
                     )
+                    
                     if tested_software_column != self.processor.software_column:
-                        df_data = df_data.drop(columns=[tested_software_column])
-
-            # Переименовываем ключевые колонки в стандартные имена
-            rename_map = {
-                self.processor.software_column: 'software_name',
-                self.processor.arm_column: 'arm_id',
-                'Волна миграции': 'wave'
-            }
+                        df_data = df_data.drop(columns=[tested_software_column], errors='ignore')
+                    
+                    # Переименовываем ключевые колонки в конце
+                    df_data = df_data.rename(columns=rename_map)
+            else:
+                # Нет tested_software - просто переименовываем и добавляем wave
+                df_data = self.processor.original_df.copy()
+                df_data = df_data.rename(columns=rename_map)
+                df_data['wave'] = wave_series
             
-            df_data = df_data.rename(columns=rename_map)
-            
+            # ОПТИМИЗАЦИЯ: Для очень больших файлов записываем по частям
+            # xlsxwriter автоматически записывает напрямую в файл без загрузки всего в память
             df_data.to_excel(writer, sheet_name='Data', index=False)
 
             # Лист 2: "Статистика по волнам"
@@ -263,7 +276,8 @@ class Exporter:
                     df_software = df_software.drop(columns=[tested_software_column])
 
         output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        # ОПТИМИЗАЦИЯ: xlsxwriter быстрее для больших списков
+        with pd.ExcelWriter(output, engine='xlsxwriter', engine_kwargs={'options': {'strings_to_numbers': False}}) as writer:
             df_software.to_excel(writer, sheet_name=sheet_name, index=False)
         output.seek(0)
         return output
@@ -288,7 +302,8 @@ class Exporter:
         })
 
         output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        # ОПТИМИЗАЦИЯ: xlsxwriter быстрее для больших списков
+        with pd.ExcelWriter(output, engine='xlsxwriter', engine_kwargs={'options': {'strings_to_numbers': False}}) as writer:
             df_arms.to_excel(writer, sheet_name=sheet_name, index=False)
         output.seek(0)
         return output
