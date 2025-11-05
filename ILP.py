@@ -51,6 +51,10 @@ class ILPSoftwareSelector:
             for j, arm in enumerate(remaining_arms)
         }
         
+        # Создаем индексы для уникальных имён ограничений
+        arm_index = {arm: j for j, arm in enumerate(remaining_arms)}
+        sw_index = {sw: i for i, sw in enumerate(available_software)}
+        
         # ЦЕЛЕВАЯ ФУНКЦИЯ
         # Максимизируем количество полностью покрытых АРМов.
         # Добавляем маленький бонус за каждое выбранное ПО, чтобы решатель
@@ -72,20 +76,20 @@ class ILPSoftwareSelector:
             
             # Если для АРМа нет необходимого ПО в доступном списке, он не может быть покрыт
             if not untested_sw_for_arm:
-                problem += z[arm] == 0, f"ARM_uncoverable_{arm}"
+                problem += z[arm] == 0, f"ARM_uncoverable_a{arm_index[arm]}"
                 continue
 
             # Чтобы АРМ был покрыт (z[arm] = 1), КАЖДОЕ из его непротестированных ПО должно быть выбрано.
             # Это логическое "И", которое в ILP моделируется так:
             # Ограничение "вниз": z[arm] должно быть <= x[sw] для каждого нужного ПО
             for sw in untested_sw_for_arm:
-                problem += z[arm] <= x[sw], f"ARM_completeness_{arm}_{sw}"
+                problem += z[arm] <= x[sw], f"ARM_comp_a{arm_index[arm]}_s{sw_index[sw]}"
             
             # Ограничение "вверх": z[arm] должно стать 1, если все x[sw] равны 1
             # z[arm] >= sum(x[sw]) - (N-1), где N - количество нужного ПО
             problem += (
                 z[arm] >= lpSum(x[sw] for sw in untested_sw_for_arm) - (len(untested_sw_for_arm) - 1),
-                f"ARM_force_complete_{arm}"
+                f"ARM_force_a{arm_index[arm]}"
             )
 
         # РЕШЕНИЕ ЗАДАЧИ
@@ -175,6 +179,10 @@ class ILPSoftwareSelector:
         # Переменные покрытия пользователей
         z = {arm: LpVariable(f"arm_{j}", cat=LpBinary) for j, arm in enumerate(remaining_arms)}
 
+        # Создаем индексы для уникальных имён ограничений
+        arm_index = {arm: j for j, arm in enumerate(remaining_arms)}
+        sw_index = {sw: i for i, sw in enumerate(available_software)}
+
         # Целевая функция — минимизировать количество выбранных ПО
         problem += lpSum(x.values()), "Minimize_Software_Count"
 
@@ -184,17 +192,17 @@ class ILPSoftwareSelector:
                 (self.processor.arm_software_map.get(arm, set()) - already_tested) & available_software_set
             )
             if not untested_sw_for_arm:
-                problem += z[arm] == 0
+                problem += z[arm] == 0, f"MIN_uncoverable_a{arm_index[arm]}"
                 continue
 
             n = len(untested_sw_for_arm)
 
             # z[arm] ≤ x[sw] для всех sw ∈ требуемом множестве
             for sw in untested_sw_for_arm:
-                problem += z[arm] <= x[sw]
+                problem += z[arm] <= x[sw], f"MIN_comp_a{arm_index[arm]}_s{sw_index[sw]}"
 
             # z[arm] ≥ sum(x[sw]) - (n - 1)
-            problem += z[arm] >= lpSum(x[sw] for sw in untested_sw_for_arm) - (n - 1)
+            problem += z[arm] >= lpSum(x[sw] for sw in untested_sw_for_arm) - (n - 1), f"MIN_force_a{arm_index[arm]}"
 
         # Целевое количество покрытых пользователей
         problem += lpSum(z.values()) >= target_arms_count, "Target_Coverage"
