@@ -58,6 +58,14 @@ class ILPSoftwareSelector:
             for j, arm in enumerate(remaining_arms)
         }
         
+        # Задаем начальные значения для z[arm] на основе warm_start
+        if warm_start_solution:
+            for arm in remaining_arms:
+                untested_sw_for_arm = self.processor.arm_software_map.get(arm, set()) - already_tested
+                # АРМ покрыт, если все его непротестированное ПО есть в warm_start
+                is_covered = untested_sw_for_arm and untested_sw_for_arm.issubset(warm_start_solution)
+                z[arm].setInitialValue(1 if is_covered else 0)
+        
         # Создаем индексы для уникальных имён ограничений
         arm_index = {arm: j for j, arm in enumerate(remaining_arms)}
         sw_index = {sw: i for i, sw in enumerate(available_software)}
@@ -100,15 +108,19 @@ class ILPSoftwareSelector:
             )
 
         # РЕШЕНИЕ ЗАДАЧИ
-        # Используем CBC решатель, который идет в комплекте с PuLP. msg=0 отключает лишний вывод.
+        # Используем HiGHS решатель с поддержкой warm start
         solver = HiGHS(
             msg=0,
-            timeLimit=time_limit
+            timeLimit=time_limit,
+            warmStart=True  # Включаем использование начальных значений переменных
         )
 
         problem.solve(solver)
         
-        # ИЗВЛЕЧЕНИЕ РЕЗУЛЬТАТА
+        # ПРОВЕРКА СТАТУСА И ИЗВЛЕЧЕНИЕ РЕЗУЛЬТАТА
+        status = LpStatus[problem.status]
+        
+        # Извлекаем решение из переменных (если есть)
         selected_software = {
             sw for sw in available_software
             if x[sw].varValue is not None and x[sw].varValue > 0.5
@@ -119,7 +131,25 @@ class ILPSoftwareSelector:
             if z[arm].varValue is not None and z[arm].varValue > 0.5
         }
         
-        return selected_software, migrating_arms
+        # Если решение оптимальное или найдено непустое feasible решение - возвращаем его
+        if status == 'Optimal' or (selected_software and migrating_arms):
+            return selected_software, migrating_arms
+        
+        # Если solver не вернул решение (timeout без feasible), используем warm_start как fallback
+        # Это происходит когда: status = 'Not Solved' или 'Infeasible' или другой неуспешный статус
+        if warm_start_solution:
+            # Вычисляем покрытые АРМы для warm_start решения
+            covered_arms = set()
+            for arm in remaining_arms:
+                untested_sw_for_arm = self.processor.arm_software_map.get(arm, set()) - already_tested
+                # АРМ покрыт, если все его непротестированное ПО есть в warm_start
+                if untested_sw_for_arm and untested_sw_for_arm.issubset(warm_start_solution):
+                    covered_arms.add(arm)
+            
+            return warm_start_solution, covered_arms
+        
+        # Нет ни решения от solver'а, ни warm_start - возвращаем пустое решение
+        return set(), set()
     
     def find_minimum_software_for_coverage_ilp(
     self,
@@ -186,6 +216,14 @@ class ILPSoftwareSelector:
         # Переменные покрытия пользователей
         z = {arm: LpVariable(f"arm_{j}", cat=LpBinary) for j, arm in enumerate(remaining_arms)}
 
+        # Задаем начальные значения для z[arm] на основе warm_start
+        if warm_start_solution:
+            for arm in remaining_arms:
+                untested_sw_for_arm = (self.processor.arm_software_map.get(arm, set()) - already_tested) & available_software_set
+                # АРМ покрыт, если все его непротестированное ПО есть в warm_start
+                is_covered = untested_sw_for_arm and untested_sw_for_arm.issubset(warm_start_solution)
+                z[arm].setInitialValue(1 if is_covered else 0)
+
         # Создаем индексы для уникальных имён ограничений
         arm_index = {arm: j for j, arm in enumerate(remaining_arms)}
         sw_index = {sw: i for i, sw in enumerate(available_software)}
@@ -222,19 +260,27 @@ class ILPSoftwareSelector:
         solver = HiGHS(
             timeLimit=time_limit,
             options=['randomSeed 123', 'randomCbcSeed 456'],
-            msg=0
+            msg=0,
+            warmStart=True  # Включаем использование начальных значений переменных
         )
         problem.solve(solver)
 
         # --- Проверка статуса решения ---
-        if LpStatus[problem.status] != 'Optimal':
-            if warm_start_solution:
-                covered_by_greedy = self.processor.get_covered_arms(already_tested | warm_start_solution)
-                if len(covered_by_greedy) >= target_arms_count:
-                    return warm_start_solution, covered_by_greedy
-
-        # --- Извлечение результата ---
-        selected_software = {sw for sw in available_software if x[sw].varValue > 0.5}
-        covered_arms = {arm for arm in remaining_arms if z[arm].varValue > 0.5}
-
-        return selected_software, covered_arms
+        status = LpStatus[problem.status]
+        
+        # Извлекаем решение из переменных (если есть)
+        selected_software = {sw for sw in available_software if x[sw].varValue is not None and x[sw].varValue > 0.5}
+        covered_arms = {arm for arm in remaining_arms if z[arm].varValue is not None and z[arm].varValue > 0.5}
+        
+        # Если решение оптимальное или найдено непустое feasible решение - возвращаем его
+        if status == 'Optimal' or (selected_software and covered_arms):
+            return selected_software, covered_arms
+        
+        # Если solver не вернул решение, используем warm_start как fallback
+        if warm_start_solution:
+            covered_by_greedy = self.processor.get_covered_arms(already_tested | warm_start_solution)
+            if len(covered_by_greedy) >= target_arms_count:
+                return warm_start_solution, covered_by_greedy
+        
+        # Нет ни решения от solver'а, ни подходящего warm_start
+        return set(), set()

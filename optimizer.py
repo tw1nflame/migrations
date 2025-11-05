@@ -134,12 +134,15 @@ class MigrationOptimizer:
                     remaining_arms=remaining_arms - migrated_arms
                 )
                 
+                # Вычисляем лимит времени для одной волны
+                wave_time_limit = None if time_limit is None else time_limit / n_waves
+                
                 # Используем эвристическое решение как warm start
                 wave_software, wave_arms = ilp_solver.find_best_software_set_ilp(
                     limit=limit,
                     already_tested=tested_software,
                     remaining_arms=remaining_arms - migrated_arms,
-                    time_limit=time_limit / n_waves,
+                    time_limit=wave_time_limit,
                     warm_start_solution=greedy_solution
                 )
             else:
